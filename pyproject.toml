@@ -87,7 +87,36 @@ filterwarnings = [
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-extend-exclude = ["build", "dist"]
+# The vendored agent core (yuki/{agent,ax,messages,providers,tools}) is not
+# linted to MacOS-Use's standards. We only lint code we own end-to-end.
+# yuki.providers.stub IS ours and stays linted.
+extend-exclude = [
+    "build",
+    "dist",
+    "yuki/agent/**",
+    "yuki/ax/**",
+    "yuki/messages/**",
+    "yuki/providers/anthropic/**",
+    "yuki/providers/azure_openai/**",
+    "yuki/providers/cerebras/**",
+    "yuki/providers/deepgram/**",
+    "yuki/providers/deepseek/**",
+    "yuki/providers/elevenlabs/**",
+    "yuki/providers/google/**",
+    "yuki/providers/groq/**",
+    "yuki/providers/litellm/**",
+    "yuki/providers/mistral/**",
+    "yuki/providers/nvidia/**",
+    "yuki/providers/ollama/**",
+    "yuki/providers/open_router/**",
+    "yuki/providers/openai/**",
+    "yuki/providers/vllm/**",
+    "yuki/providers/base.py",
+    "yuki/providers/events.py",
+    "yuki/providers/views.py",
+    "yuki/providers/__init__.py",
+    "yuki/tools/**",
+]
 
 [tool.ruff.lint]
 select = [

@@ -19,7 +19,7 @@ class ChatAnthropic(BaseChatLLM):
 
     def __init__(
         self,
-        model: str = "claude-3-5-sonnet-latest",
+        model: str = "claude-sonnet-4-6",
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         timeout: float = 600.0,
