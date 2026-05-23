@@ -120,7 +120,9 @@ extend-exclude = [
     "yuki/providers/events.py",
     "yuki/providers/views.py",
     "yuki/providers/__init__.py",
-    "yuki/tools/**",
+    # Vendored UI-primitive tools — only the top-level files, not subdirs we own.
+    "yuki/tools/__init__.py",
+    "yuki/tools/service.py",
 ]
 
 [tool.ruff.lint]
@@ -162,6 +164,7 @@ module = [
     "yuki.ax.*",
     "yuki.messages.*",
     "yuki.providers.*",
-    "yuki.tools.*",
+    "yuki.tools",        # vendored top-level only
+    "yuki.tools.service",
 ]
 ignore_errors = true
