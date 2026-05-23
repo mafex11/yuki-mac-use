@@ -135,3 +135,24 @@ class LoopGuard:
         self._last_action_key = None
         self._last_action_failed = False
         self._failed_retry_warning = ''
+
+
+def should_continue(assistant_message) -> bool:
+    """Continue the agent loop iff the assistant emitted any tool_use blocks.
+
+    stop_reason is unreliable per Anthropic's own implementation
+    (see claude-leak/src/query.ts:557 in the leaked Claude Code source).
+    The block list is authoritative.
+
+    Used as a defensive predicate for any future provider that produces
+    Anthropic-shaped messages. The vendored MacOS-Use loop already uses
+    "tool_name == 'done_tool'" as its termination signal.
+    """
+    blocks = getattr(assistant_message, "content", None) or []
+    for b in blocks:
+        kind = getattr(b, "type", None) or (
+            b.get("type") if isinstance(b, dict) else None
+        )
+        if kind == "tool_use":
+            return True
+    return False
