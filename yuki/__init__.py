@@ -23,5 +23,6 @@ __version__ = "0.0.1"
 
 from yuki.agent.desktop.views import Browser
 from yuki.agent.service import Agent
+from yuki.tools.native.registry import DangerLevel, tool
 
-__all__ = ["Agent", "Browser", "__version__"]
+__all__ = ["Agent", "Browser", "DangerLevel", "__version__", "tool"]
