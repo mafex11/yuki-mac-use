@@ -36,6 +36,7 @@ def create_app() -> FastAPI:
 
     from yuki.backend.routers import (
         chat,
+        health,
         memory,
         safety,
         scan,
@@ -44,6 +45,8 @@ def create_app() -> FastAPI:
         triggers,
     )
 
+    # /healthz has no auth — menu-bar app polls it on startup.
+    app.include_router(health.router)
     app.include_router(tools.router, dependencies=[Depends(require_token)])
     app.include_router(memory.router, dependencies=[Depends(require_token)])
     app.include_router(triggers.router, dependencies=[Depends(require_token)])
