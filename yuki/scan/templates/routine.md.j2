@@ -1,0 +1,5 @@
+# {{ name }}
+
+**Schedule:** {{ attributes.schedule }}
+
+Steps: {% for s in attributes.steps %}[[{{ s }}]]{% if not loop.last %}, {% endif %}{% endfor %}
