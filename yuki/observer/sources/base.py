@@ -34,5 +34,6 @@ class Source:
                 await self.iterate(buffer)
             except Exception as e:
                 log.warning("source %s failed: %s", self.name, e)
-            if tick > 0:
-                await asyncio.sleep(tick)
+            # Always yield, even with tick=0, so task.cancel() can take effect
+            # and a tight-loop source can't starve the event loop.
+            await asyncio.sleep(tick)
