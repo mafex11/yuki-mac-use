@@ -1,0 +1,85 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set version env
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install Node + build frontend
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: |
+          if [ -d frontend ]; then
+            cd frontend
+            npm ci
+            npm run build
+            rm -rf ../yuki/backend/static
+            cp -r out ../yuki/backend/static
+          fi
+
+      - name: Build Swift menubar
+        run: |
+          cd app
+          swift build -c release
+
+      - name: Briefcase build
+        run: |
+          uv run briefcase create macOS app -c packaging/briefcase.toml
+          uv run briefcase build macOS app -c packaging/briefcase.toml
+
+      - name: Code-sign + notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+        run: |
+          codesign --force --deep --options runtime \
+            --sign "$APPLE_DEVELOPER_ID" \
+            macOS/app/Yuki/Yuki.app
+          ./packaging/notarize.sh macOS/app/Yuki/Yuki.app
+
+      - name: Build DMG
+        run: |
+          ./packaging/make_dmg.sh macOS/app/Yuki/Yuki.app "Yuki-${VERSION}.dmg"
+
+      - name: Sign DMG for Sparkle
+        env:
+          SPARKLE_ED25519_KEY: ${{ secrets.SPARKLE_ED25519_KEY }}
+        run: |
+          echo "$SPARKLE_ED25519_KEY" > /tmp/sparkle_key
+          ./packaging/sparkle/sign.sh "Yuki-${VERSION}.dmg" /tmp/sparkle_key
+          rm /tmp/sparkle_key
+
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Yuki-*.dmg
+          fail_on_unmatched_files: true
+
+      - name: Refresh Homebrew Cask formula
+        env:
+          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          DMG_SHA=$(shasum -a 256 "Yuki-${VERSION}.dmg" | awk '{print $1}')
+          sed -i '' \
+            -e "s|version \".*\"|version \"${VERSION}\"|" \
+            -e "s|sha256 :no_check|sha256 \"${DMG_SHA}\"|" \
+            packaging/homebrew/yuki.rb
