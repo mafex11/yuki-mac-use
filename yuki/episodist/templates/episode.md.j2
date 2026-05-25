@@ -1,0 +1,19 @@
+---
+type: episode
+id: episode-{{ date }}
+date: {{ date }}
+created_at: {{ now }}
+updated_at: {{ now }}
+confidence: 1.0
+source: [observer]
+---
+
+# {{ date }}
+
+{% for s in sessions %}
+## {{ s.start_h }}:{{ "%02d" | format(s.start_m) }}–{{ s.end_h }}:{{ "%02d" | format(s.end_m) }} — {{ s.label }}
+
+{% if s.bullets %}{% for b in s.bullets %}- {{ b }}
+{% endfor %}{% endif %}
+
+{% endfor %}
