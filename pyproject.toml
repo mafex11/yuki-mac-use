@@ -51,6 +51,7 @@ dependencies = [
     "pydantic>=2.9.0",
     "sqlite-vec>=0.1.6",
     "voyageai>=0.3.2",
+    "jinja2>=3.1.4",
 ]
 
 [dependency-groups]
