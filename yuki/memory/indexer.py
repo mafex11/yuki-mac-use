@@ -37,7 +37,10 @@ class Indexer:
 
     def open(self) -> None:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(self._db_path)
+        # check_same_thread=False allows the FastAPI request thread (separate
+        # from the lifespan thread) to use the same connection. SQLite itself
+        # is thread-safe in serialized mode; we just need this opt-in.
+        conn = sqlite3.connect(self._db_path, check_same_thread=False)
         conn.enable_load_extension(True)
         sqlite_vec.load(conn)
         conn.enable_load_extension(False)
