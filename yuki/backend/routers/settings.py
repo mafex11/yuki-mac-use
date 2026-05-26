@@ -21,6 +21,7 @@ ALLOWED = {
     "wakeword_enabled",
     "hotkey",
 }
+ALLOWED_PROVIDERS = {"anthropic", "ollama", "google"}
 DEFAULTS: dict[str, Any] = {
     "llm_provider": "anthropic",
     "llm_model": "claude-sonnet-4-6",
@@ -63,6 +64,11 @@ def put(updates: dict[str, Any]) -> dict[str, Any]:
     if unknown:
         raise HTTPException(
             status_code=400, detail=f"unknown keys: {sorted(unknown)}"
+        )
+    if "llm_provider" in updates and updates["llm_provider"] not in ALLOWED_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"llm_provider must be one of {sorted(ALLOWED_PROVIDERS)}",
         )
     current = _load()
     current.update(updates)

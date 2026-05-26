@@ -32,6 +32,7 @@ async def _stream_events(
     """
     from yuki.agent import Agent
     from yuki.memory import load_hot_context
+    from yuki.providers.factory import ProviderConfigError, make_llm
     from yuki.providers.stub import ChatStub
 
     rt = get_runtime()
@@ -50,7 +51,14 @@ async def _stream_events(
         else f"<identity_context>\n{hot}\n</identity_context>\n\nUser task: {message}"
     )
 
-    agent = Agent(llm=ChatStub())  # type: ignore[arg-type]
+    try:
+        llm = make_llm()
+    except ProviderConfigError as e:
+        # Fall back to the stub so the chat surface stays alive; tell the user.
+        yield {"type": "error", "content": str(e)}
+        llm = ChatStub()  # type: ignore[assignment]
+
+    agent = Agent(llm=llm)
     result = await agent.ainvoke(task=framed_task)
     final = {"type": "done", "content": getattr(result, "content", "")}
     rec.record(final)
