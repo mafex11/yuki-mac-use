@@ -28,6 +28,35 @@ logger.addHandler(handler)
 
 _NON_TOOL_PARAMS = {"thought", "evaluate", "plan"}
 
+# Settle delay (seconds) applied AFTER a tool runs and BEFORE the next AX-tree
+# refresh, to let UI animations and focus changes propagate. Ported from
+# LLM-OS windows_use/agent/service.py:546-626 settle policy. Tool names match
+# yuki.agent.tools.service. Tools not listed default to 0.0s (no extra wait).
+_POST_ACTION_SETTLE: dict[str, float] = {
+    # Strong settle: window-level changes
+    "app_tool": 0.5,           # launch/switch/resize → window animations
+    # Medium settle: focus + tab/window structural changes
+    "shortcut_tool": 0.3,      # cmd+t / cmd+w / cmd+r / cmd+n etc.
+    "click_tool": 0.2,         # may navigate or open modal
+    "type_tool": 0.2,          # press_enter triggers nav; safe minimum
+    "scroll_tool": 0.2,        # content reflows
+    "move_tool": 0.0,          # pure mouse move; no UI mutation
+    "drag_tool": 0.3,          # drop may reorder UI
+    "multi_select_tool": 0.2,
+    "multi_edit_tool": 0.2,
+    # No settle: explicit wait or terminal/non-UI tools
+    "wait_tool": 0.0,          # already waited
+    "done_tool": 0.0,          # terminal
+    "shell_tool": 0.0,         # background shell, no UI mutation
+    "memory_tool": 0.0,
+    "scrape_tool": 0.0,
+    "desktop_tool": 0.5,       # space switching
+}
+
+
+def _settle_for(tool_name: str) -> float:
+    return _POST_ACTION_SETTLE.get(tool_name, 0.0)
+
 
 class Agent(BaseAgent):
     def __init__(
@@ -242,6 +271,12 @@ class Agent(BaseAgent):
 
             self._loop_guard.record_action(tool_name, tool_params, tool_result.is_success)
 
+            # Smart settle: let UI animations finish before the next state capture.
+            # Per-tool delays are in _POST_ACTION_SETTLE.
+            settle = _settle_for(tool_name) if tool_result.is_success else 0.0
+            if settle > 0.0 and tool_name != "done_tool":
+                time.sleep(settle)
+
             if tool_result.is_success:
                 content = tool_result.content
                 message.content = content
@@ -423,6 +458,11 @@ class Agent(BaseAgent):
             tool_result = await self.registry.aexecute(tool_name=tool_name, tool_params=tool_params, desktop=self.desktop)
 
             self._loop_guard.record_action(tool_name, tool_params, tool_result.is_success)
+
+            # Smart settle: let UI animations finish before the next state capture.
+            settle = _settle_for(tool_name) if tool_result.is_success else 0.0
+            if settle > 0.0 and tool_name != "done_tool":
+                await asyncio.sleep(settle)
 
             if tool_result.is_success:
                 content = tool_result.content
