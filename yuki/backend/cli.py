@@ -57,7 +57,18 @@ def main() -> None:
         sys.exit(2)
     set_active_token(token)
     port = int(os.environ.get("YUKI_PORT", "0"))
-    uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="warning")
+    if port:
+        print(
+            f"yuki: backend listening on http://127.0.0.1:{port}",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "yuki: backend starting on a random port — "
+            "check the uvicorn line below for the actual port",
+            file=sys.stderr,
+        )
+    uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="info")
 
 
 if __name__ == "__main__":
