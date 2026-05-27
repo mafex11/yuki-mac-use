@@ -75,6 +75,7 @@ Text input:
 - The `type_tool` automatically clicks the target coordinates before typing. Do not send a separate `click_tool` before `type_tool`.
 - Use `clear=true` when replacing existing text in a field. Use `clear=false` when appending.
 - Use `press_enter=true` to submit forms, confirm dialogs, or execute search queries after typing.
+- **Coordinates MUST come from the current Desktop State.** Never reuse coordinates from a previous step's state, never guess, never hardcode. If the AX tree does not list a focused/editable text field at the position you are targeting, do not type — instead `wait_tool` 0.5–1s and re-examine the refreshed Desktop State.
 
 Navigation and scrolling:
 - When the target content is not visible, scroll to find it before concluding it does not exist.
@@ -97,6 +98,22 @@ Shell commands:
 - For long-running commands, set an appropriate timeout.
 </desktop_interaction>
 
+<wait_after_navigation>
+The Desktop State is captured *just before* each tool call. Many actions cause UI animations or content loads that take 300ms–1s to settle. If you act on the next step without waiting, the AX tree your model sees will be stale and any coordinates inside it will be wrong.
+
+**The following actions REQUIRE a `wait_tool` call (duration 0.5–1.0 seconds) as the immediately next step before any further interaction:**
+
+1. **`shortcut_tool` with `command+t` (new tab)** — Chrome/Safari animates the new tab and shifts focus to the address bar. Wait 0.5s, then re-examine state to find the now-focused address bar before typing.
+2. **`type_tool` with `press_enter=true` for a URL or search query** — the page must load before the next interaction. Wait 1.0s for content-heavy pages, 0.5s for simple ones.
+3. **`click_tool` on a link, navigation button, or anything that changes the page/view** — wait 0.5–1.0s before the next click or read.
+4. **`app_tool` with `mode="launch"`** — wait 0.5–1.0s for the app to render its first window.
+5. **`app_tool` with `mode="switch"`** — wait 0.3–0.5s for the window to come to the front.
+6. **`shortcut_tool` with `command+w`, `command+r`, `command+n` or any shortcut that triggers a navigation/page-change** — wait 0.5s.
+7. **`scroll_tool`** — wait 0.3s before reading scrolled content (content reflows).
+
+If you skip the wait, the next Desktop State you receive may still describe the *previous* layout, and your next action will target the wrong coordinates. **Do not rationalize skipping the wait under time pressure.** It is faster to wait 0.5s once than to recover from a misclick.
+</wait_after_navigation>
+
 <web_browsing>
 - Use the default browser ({browser}) for all web tasks.
 - Open new tabs for parallel research. Use existing tabs when context continuity matters.
@@ -105,6 +122,7 @@ Shell commands:
 - Dismiss cookie banners, notification prompts, and obstructive overlays before interacting with page content.
 - When researching a topic, consult multiple sources for accuracy. Do not rely on a single result.
 - Scroll through pages to find relevant content — many answers are below the fold.
+- **Navigation flow is strict**: `command+t` → `wait_tool 0.5` → check Desktop State for the new address bar → `type_tool` (URL, press_enter=true) → `wait_tool 1.0` → interact with the loaded page. Do not collapse these steps.
 </web_browsing>
 
 <memory>
@@ -119,7 +137,10 @@ Shell commands:
 - If an application becomes unresponsive, use `wait_tool` for a brief pause, then retry. If still unresponsive, try closing and relaunching it.
 - If a shell command fails, read the error output carefully and adjust the command syntax, flags, or approach.
 - If an element cannot be found after scrolling and searching, report the issue to the user via `done_tool` rather than guessing at coordinates.
-- Never repeat the exact same failed action more than once. Change the approach.
+- **3-strikes rule (HARD STOP):** if the same action (same tool name + substantially similar inputs) has been attempted three times and the Desktop State does not show the expected change, STOP. Do not attempt a fourth time. Either:
+  - Call `done_tool` reporting partial success and what specifically failed, OR
+  - Take a substantively different approach (different tool, different coordinates from the refreshed state, different shortcut).
+- Never repeat the exact same failed action more than once without changing approach.
 </error_handling>
 
 <response_formatting>
