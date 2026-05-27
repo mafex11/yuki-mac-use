@@ -6,7 +6,9 @@ from collections import Counter, deque
 from yuki.agent.desktop.views import DesktopState
 
 _EXEMPT = {'done_tool', 'wait_tool'}
-_IGNORE_PARAMS = {'thought'}
+_IGNORE_PARAMS = {'thought', 'evaluate', 'plan'}
+# Hard-stop threshold: same action repeated this many times in a row → halt.
+_HARD_STOP_REPEATS = 3
 
 _REPEAT_NUDGES = {
     3: 'You have repeated the same action {n} times — make sure it is actually making progress.',
@@ -33,6 +35,10 @@ class LoopGuard:
         self._last_action_key: str | None = None
         self._last_action_failed: bool = False
         self._failed_retry_warning: str = ''
+        # Count of CONSECUTIVE identical actions (resets when a different
+        # action is seen). Distinct from _hashes which tracks a sliding window.
+        self._consecutive_repeats: int = 1
+        self._last_consecutive_tool: str | None = None
 
     def record_action(self, tool: str, params: dict, is_success: bool = True) -> None:
         if tool in _EXEMPT:
@@ -54,6 +60,13 @@ class LoopGuard:
             )
         else:
             self._failed_retry_warning = ''
+
+        # Consecutive-same-action tracking (for hard stop).
+        if self._last_action_key == key:
+            self._consecutive_repeats += 1
+        else:
+            self._consecutive_repeats = 1
+        self._last_consecutive_tool = tool
 
         self._last_action_key = key
         self._last_action_failed = not is_success
@@ -126,6 +139,26 @@ class LoopGuard:
 
         return '\n\n'.join(warnings) or None
 
+    def hard_stop_reason(self) -> str | None:
+        """Return a non-empty reason if the loop must HARD STOP this turn.
+
+        Triggered when the same (tool, params) was seen `_HARD_STOP_REPEATS`
+        consecutive times — port of LLM-OS rule #7. The agent loop should
+        inject this as a system message forcing `done_tool` or `human_tool`.
+        """
+        if self._consecutive_repeats >= _HARD_STOP_REPEATS and self._last_consecutive_tool:
+            return (
+                f"You have called '{self._last_consecutive_tool}' with the same "
+                f"parameters {self._consecutive_repeats} times in a row without "
+                "the desired effect. STOP. Call `done_tool` reporting partial "
+                "success and the specific failure, OR call `human_tool` to ask "
+                "for guidance, OR take a substantively different approach "
+                "(different tool, different coordinates from the refreshed "
+                "Desktop State, different shortcut). Do NOT call the same "
+                "action a fourth time."
+            )
+        return None
+
     def reset(self) -> None:
         self._hashes.clear()
         self._last_state = None
@@ -135,6 +168,8 @@ class LoopGuard:
         self._last_action_key = None
         self._last_action_failed = False
         self._failed_retry_warning = ''
+        self._consecutive_repeats = 1
+        self._last_consecutive_tool = None
 
 
 def should_continue(assistant_message) -> bool:

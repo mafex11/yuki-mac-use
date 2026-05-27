@@ -163,6 +163,9 @@ class Agent(BaseAgent):
             self.state.step = step
 
             nudge = None if self.disable_loop_detection else self._loop_guard.check()
+            hard_stop = None if self.disable_loop_detection else self._loop_guard.hard_stop_reason()
+            if hard_stop:
+                nudge = f"{nudge}\n\n{hard_stop}" if nudge else hard_stop
             state_msg = self.context.state(
                 query=self.state.task,
                 step=step,
@@ -353,6 +356,9 @@ class Agent(BaseAgent):
             self.state.step = step
 
             nudge = None if self.disable_loop_detection else self._loop_guard.check()
+            hard_stop = None if self.disable_loop_detection else self._loop_guard.hard_stop_reason()
+            if hard_stop:
+                nudge = f"{nudge}\n\n{hard_stop}" if nudge else hard_stop
             state_msg = self.context.state(
                 query=self.state.task,
                 step=step,
