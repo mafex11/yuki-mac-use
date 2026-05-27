@@ -31,3 +31,7 @@ htmlcov/
 # Yuki runtime artifacts (when the app eventually runs)
 /Yuki.app/
 /dist-app/
+
+# Local secrets
+.env
+.env.local
