@@ -26,7 +26,7 @@ formatter = logging.Formatter("[%(levelname)s] %(message)s")
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-_NON_TOOL_PARAMS = {"thought", "evaluate"}
+_NON_TOOL_PARAMS = {"thought", "evaluate", "plan"}
 
 
 class Agent(BaseAgent):
@@ -210,7 +210,17 @@ class Agent(BaseAgent):
             tool_name = message.name
             tool_params = message.params
 
+            evaluate = tool_params.get("evaluate", "neutral")
+            plan = tool_params.get("plan", "")
             thought = tool_params.get("thought", "")
+            if evaluate and evaluate != "neutral":
+                self.event.emit(
+                    AgentEvent(type=EventType.EVALUATE, data={"step": step, "evaluate": evaluate})
+                )
+            if plan:
+                self.event.emit(
+                    AgentEvent(type=EventType.PLAN, data={"step": step, "plan": plan})
+                )
             self.event.emit(
                 AgentEvent(type=EventType.THOUGHT, data={"step": step, "thought": thought})
             )
@@ -383,7 +393,17 @@ class Agent(BaseAgent):
             tool_name = message.name
             tool_params = message.params
 
+            evaluate = tool_params.get("evaluate", "neutral")
+            plan = tool_params.get("plan", "")
             thought = tool_params.get("thought", "")
+            if evaluate and evaluate != "neutral":
+                self.event.emit(
+                    AgentEvent(type=EventType.EVALUATE, data={"step": step, "evaluate": evaluate})
+                )
+            if plan:
+                self.event.emit(
+                    AgentEvent(type=EventType.PLAN, data={"step": step, "plan": plan})
+                )
             self.event.emit(
                 AgentEvent(type=EventType.THOUGHT, data={"step": step, "thought": thought})
             )

@@ -4,14 +4,18 @@ from typing import Literal, Optional
 class SharedBaseModel(BaseModel):
 
     model_config = ConfigDict(extra='allow')
-    
+
     evaluate: Literal["success", "neutral", "fail"] = Field(
         "neutral",
         description="Assessment of the previous action's outcome: 'success' if the last action achieved its goal, 'fail' if it did not produce the expected result, 'neutral' for the first action or when the outcome is unclear"
     )
+    plan: str = Field(
+        "",
+        description="The current step-by-step plan to satisfy the user's task, regenerated on every turn from the latest Desktop State. Mark completed steps as DONE and the active step as ACTIVE. Empty string is acceptable on the first action and on conversational tasks that need no plan. (max. 6 short lines)"
+    )
     thought: str = Field(
         ...,
-        description="A rigorous thinking process where you analyze the current state, potential issues, and plan the next steps effectively. (max. 3 sentences)"
+        description="A rigorous thinking process where you analyze the current state, potential issues, and explain why this specific action advances the active step of the plan. (max. 3 sentences)"
     )
 
 class App(SharedBaseModel):

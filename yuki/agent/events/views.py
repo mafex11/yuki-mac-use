@@ -7,6 +7,8 @@ from typing import Any
 
 class EventType(str, Enum):
     THOUGHT = "thought"
+    PLAN = "plan"
+    EVALUATE = "evaluate"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     STATE = "state"
