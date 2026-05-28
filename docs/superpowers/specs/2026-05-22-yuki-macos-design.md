@@ -809,3 +809,122 @@ Yuki ships when:
 12. Zero network calls observed in tcpdump beyond the documented allowed list
 13. App size ≤200MB
 14. Cold start to chat-ready ≤3 seconds on Apple Silicon, ≤5 seconds on Intel
+
+---
+
+## 16. Amendment — Agent self-improvement via vault feedback loop
+
+**Status:** Added 2026-05-28. Implements as Plan M.
+
+**Motivation.** Live observation showed `/control` failing on multi-step browser tasks because (a) the AX tree did not surface focus/value strongly enough for the LLM to disambiguate elements, and (b) the system had no mechanism to learn from past failures on a given app. The original v1 design has a weekly compactor (§6.4) producing routine/people/app updates from episodes, but its cadence is too slow to act as a per-app self-improvement loop.
+
+This amendment splits agent-self-improvement (fast loop) away from narrative summarization (slow loop) and adds a universal AX classifier that disambiguates elements without per-app code.
+
+### 16.1 Three cadences, three mechanisms
+
+| Cadence | Trigger | Mechanism | Cost | Output |
+|---|---|---|---|---|
+| **Per-action** | Each tool call inside the agent loop | Pure-Python universal AX classifier (no LLM) | 0 | Tags interactive elements with canonical roles (`url_bar`, `search_field`, `text_input`, `submit_button`, `link`, `tab`, `primary_input`); surfaces a `<focused_input>` block at the top of the rendered Desktop State |
+| **Per-task** | `/control` returns | Pure-Python deterministic recorder | 0 | Appends one structured YAML record per task to `60-Episodes/control-YYYY-MM-DD.md` (task, app(s), outcome, action trace, observed AX state pre/post each action, structured failure mode) |
+| **Daily** | Cron / launchd, 03:00 local | Light Haiku pass over yesterday's `control-*.md` only | ~1 call per app touched / day, ~$0.01 / day | Updates `40-Apps/<slug>.md` with an auto-managed `## Auto-learned` section: confirmed-working coordinates and patterns, failure modes to avoid |
+| **Weekly** | Cron / launchd, Sunday 03:00 local (existing §6.4 compactor) | Existing compactor with **narrowed scope** | unchanged | Routines (§4.2 `RoutineNote`), people (§4.2 `PersonNote`), projects (§4.2 `ProjectNote`). **No longer writes app guidance** — that is now the daily learner's job. |
+
+### 16.2 Universal AX classifier (no per-app code)
+
+For every interactive node returned by the AX tree walk, run cheap Python rules against AX attributes any conformant macOS app exposes. Tags are stable, app-agnostic strings the LLM can rely on. Examples:
+
+- `url_bar` — `AXTextField` whose `AXRoleDescription` matches `address`/`URL`, OR first text field in an `AXToolbar` whose value matches `^https?://`
+- `search_field` — `AXTextField` with `AXSubrole == AXSearchField`, OR placeholder containing `search`
+- `text_input` — `AXTextField` / `AXTextArea` / `AXComboBox` (catch-all)
+- `submit_button` / `cancel_button` — `AXButton` with names in known sets
+- `link` — `AXLink`
+- `tab` — element inside `AXTabGroup`
+- `focused` — element matching the foreground window's `AXFocusedUIElement`
+- `primary_input` — the **single** focused text-like field; the model's "type here unless told otherwise" target
+
+Rules live in one file (`yuki/agent/tree/canonical.py`). Adding new tags later is one function each. Apps that do not match any rule fall back to generic `canonical=-` and the model uses generic AX info — same behavior as today, no regression.
+
+### 16.3 Per-task structured recorder
+
+After every `/control` invocation (success **or** failure), the agent loop emits one YAML record to `~/YukiVault/60-Episodes/control-YYYY-MM-DD.md`:
+
+```yaml
+- task: "open chrome and open new tab and open youtube in it"
+  conversation_id: abc123
+  duration_s: 8.2
+  steps_used: 4
+  outcome: success | failure | partial
+  apps_involved: [com.google.Chrome]
+  actions:
+    - tool: shortcut_tool
+      params: {shortcut: command+t}
+      ax_window_after: "Chrome - New Tab"
+      ax_focused_after: "url_bar (Chrome)"
+      result: success
+    - tool: type_tool
+      params: {loc: [820, 180], text: "youtube.com", press_enter: true}
+      ax_focused_before: "url_bar (Chrome)"
+      ax_value_after: "youtube.com"
+      result: success
+  failure_mode: null
+  recovery_attempts: 0
+```
+
+`failure_mode` is a small structured enum: `wrong_coords`, `element_not_focused`, `tool_validation_error`, `loop_3_strikes`, `agent_step_limit`, `provider_error`, `null` (success). Everything in this record is observable from data the agent loop already carries; no LLM judgment.
+
+### 16.4 Daily learner
+
+Cron at 03:00 reads yesterday's `control-*.md` and dispatches one Haiku call per distinct `apps_involved` value. The prompt is bounded:
+
+> Here are yesterday's `/control` task outcomes against `<bundle_id>`. For each successful action, identify any reusable coordinate or pattern. For each failure, identify the failure mode and propose specific guidance the agent should follow next time. Output as bullet points only — no narrative.
+
+Output replaces the auto-managed section in `40-Apps/<slug>.md`:
+
+```markdown
+## Auto-learned (last updated 2026-05-29)
+
+### Confirmed working
+- URL bar AX coords on this monitor (1920×1080): (820, 180)
+- After cmd+t the URL bar is focused within 300ms
+- type_tool with press_enter=true reliably navigates
+
+### Avoid
+- Coords below y=1000 are macOS dock — not Chrome content
+- After app_tool launch wait 0.5s before reading state
+```
+
+The section is **deterministically replaced each day**, not appended forever. Yesterday's auto-learned block is removed; today's is written. The handwritten part of the file (sections above `## Auto-learned`) is never touched.
+
+### 16.5 Per-task injector (read-side)
+
+When `/control` starts, before `agent.ainvoke`:
+
+1. Identify the foreground app's `bundle_id` via the existing Desktop service.
+2. Call `load_app_context(bundle_id)` which reads the matching `40-Apps/<slug>.md` plus any `30-Routines/*.md` whose frontmatter `apps:` list contains the bundle id.
+3. Inject the result into the system prompt as a new `<app_context>` block, parallel to the existing `<identity_context>` block (§4.4).
+
+This delivers Plan B's existing retrieval mechanism through a slightly different lens — same vault, same hybrid search, scoped to the active app.
+
+### 16.6 What changes in existing code
+
+- **§6.4 weekly compactor:** unchanged code, narrowed prompt. Strip "apps" from its scope; apps are now the daily learner's responsibility. One sentence edit to the compactor's prompt template.
+- **§7 tool surface:** unchanged. The classifier and recorder operate at the agent-loop layer, not the tool layer.
+- **§4 vault schema:** unchanged. The auto-learned section uses standard markdown headings inside an `AppNote`'s body. No new schema fields.
+
+### 16.7 Privacy & safety
+
+- Recorder writes only to the local vault. No network egress.
+- Daily learner uses the user's configured LLM provider with the same key the rest of the system uses. No new credential surface.
+- Auto-learned content is bounded by markdown size and replaced daily — cannot grow unbounded.
+- Recorded actions never include sensitive tool inputs (passwords, API keys) — the recorder reuses the trajectory redactor (§11.2) before writing.
+
+### 16.8 Acceptance criteria for §16
+
+§16 ships when:
+
+1. Universal classifier tags `url_bar`, `search_field`, `submit_button`, `link`, and `primary_input` correctly across Chrome, Safari, and at least three random apps in tests.
+2. Recorder writes a parseable YAML record for every `/control` task; records can be round-tripped through `yaml.safe_load`.
+3. Injector loads `40-Apps/<slug>.md` and prepends it to the agent's task in `<app_context>` tags.
+4. Daily learner runs against a fixture day's `control-*.md` and produces a syntactically-valid replacement of the `## Auto-learned` section.
+5. Weekly compactor's existing tests still pass after prompt narrowing.
+6. End-to-end YouTube task (`/control open chrome and open new tab and open youtube in it`) succeeds on a fresh vault, then succeeds faster with fewer fallback steps after one day of recorded successes.
