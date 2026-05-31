@@ -56,3 +56,5 @@ def reset_runtime() -> None:
     if _runtime is not None:
         _runtime.indexer.close()
     _runtime = None
+    from yuki.backend import auth
+    auth.reset_auth_state()

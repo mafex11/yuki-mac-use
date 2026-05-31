@@ -35,3 +35,10 @@ def verify(presented: str) -> None:
         return
     if _token is None or not secrets.compare_digest(_token, presented):
         raise AuthError("invalid token")
+
+
+def reset_auth_state() -> None:
+    """Reset module globals — used by tests / runtime reset."""
+    global _token, _uds_mode
+    _token = None
+    _uds_mode = False

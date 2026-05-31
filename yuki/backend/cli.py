@@ -50,9 +50,11 @@ def _watch_parent_death() -> None:
     def _poll() -> None:
         while True:
             time.sleep(2)
-            if os.getppid() != original_ppid or os.getppid() == 1:
+            current_ppid = os.getppid()
+            if current_ppid != original_ppid or current_ppid == 1:
                 os._exit(0)
 
+    # daemon=True: Python kills this on exit; no explicit stop needed.
     t = threading.Thread(target=_poll, daemon=True)
     t.start()
 
@@ -78,8 +80,10 @@ def main() -> None:
         auth.set_uds_mode(True)
         sock = paths.socket_path()
         sock.parent.mkdir(parents=True, exist_ok=True)
-        if sock.exists():
+        try:
             sock.unlink()
+        except FileNotFoundError:
+            pass
         _watch_parent_death()
         print(f"yuki: backend listening on UDS {sock}", file=sys.stderr)
         uvicorn.run(create_app(), uds=str(sock), log_level="info")
