@@ -4,11 +4,21 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from yuki.episodist.compactor import compact_last_week
+
+
+def _fake_llm(content_str: str) -> Any:
+    """Create a mock LLM with async ainvoke returning a message with .content string."""
+    llm = MagicMock()
+    event = MagicMock()
+    event.content = content_str
+    llm.ainvoke = AsyncMock(return_value=event)
+    return llm
 
 
 @pytest.fixture
@@ -24,20 +34,14 @@ def vault_with_episodes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
 
 
 def test_calls_haiku_and_applies_diff(vault_with_episodes: Path) -> None:
-    fake_resp = MagicMock()
-    fake_resp.content = [
-        MagicMock(
-            text=(
-                '{"entries": [{"action":"create","confidence":0.9,'
-                '"note":{"id":"routine-morning","type":"routine","name":"Morning",'
-                '"schedule":"weekdays 8am","steps":[],"trusted":false}}]}'
-            )
-        )
-    ]
-    fake_client = MagicMock()
-    fake_client.messages.create.return_value = fake_resp
+    json_response = (
+        '{"entries": [{"action":"create","confidence":0.9,'
+        '"note":{"id":"routine-morning","type":"routine","name":"Morning",'
+        '"schedule":"weekdays 8am","steps":[],"trusted":false}}]}'
+    )
+    fake_llm = _fake_llm(json_response)
 
-    with patch("yuki.episodist.compactor._client", return_value=fake_client):
+    with patch("yuki.episodist.compactor._client", return_value=fake_llm):
         result = compact_last_week(today=date(2026, 5, 17))
 
     assert result.applied == 1
@@ -50,18 +54,15 @@ def test_no_episodes_returns_empty(
     monkeypatch.setenv("YUKI_VAULT_DIR", str(tmp_path / "v"))
     monkeypatch.setenv("YUKI_VAULT_GIT", "0")
     (tmp_path / "v" / "60-Episodes").mkdir(parents=True)
-    fake_client = MagicMock()
-    with patch("yuki.episodist.compactor._client", return_value=fake_client):
+    fake_llm = _fake_llm("")
+    with patch("yuki.episodist.compactor._client", return_value=fake_llm):
         result = compact_last_week(today=date(2026, 5, 17))
     assert result.applied == 0
-    fake_client.messages.create.assert_not_called()
+    fake_llm.ainvoke.assert_not_called()
 
 
 def test_haiku_invalid_json_yields_zero_applied(vault_with_episodes: Path) -> None:
-    fake_resp = MagicMock()
-    fake_resp.content = [MagicMock(text="not json")]
-    fake_client = MagicMock()
-    fake_client.messages.create.return_value = fake_resp
-    with patch("yuki.episodist.compactor._client", return_value=fake_client):
+    fake_llm = _fake_llm("not json")
+    with patch("yuki.episodist.compactor._client", return_value=fake_llm):
         result = compact_last_week(today=date(2026, 5, 17))
     assert result.applied == 0
