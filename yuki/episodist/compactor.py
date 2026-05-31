@@ -1,7 +1,8 @@
-"""Compactor — last-7-days of episodes → vault diff via Claude Haiku."""
+"""Compactor — last-7-days of episodes → vault diff via the configured LLM."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -12,13 +13,17 @@ from typing import Any
 from yuki.episodist.diff import VaultDiff
 from yuki.memory import paths
 from yuki.memory.vault import Vault
+from yuki.messages import HumanMessage
 
 log = logging.getLogger(__name__)
 _MAX_TOKENS = 4000
 _DAYS = 7
 
 _PROMPT = """You are inspecting a user's recent computer activity to identify
-recurring patterns worth capturing as routines, important people, or apps.
+recurring patterns worth capturing as routines or important people.
+
+DO NOT propose `type: app` entries -- application guidance is managed by
+a separate daily process.
 
 Output ONLY a JSON object with this shape:
 {
@@ -36,10 +41,11 @@ Be conservative. Do not invent details. Only output entries you have
 strong evidence for from the episodes below."""
 
 
-def _client() -> Any:  # pragma: no cover — real Anthropic client only
-    from anthropic import Anthropic
+def _client() -> Any:
+    """Build an LLM via the provider factory (same as /chat)."""
+    from yuki.providers.factory import make_llm
 
-    return Anthropic()
+    return make_llm()
 
 
 @dataclass
@@ -66,17 +72,21 @@ def compact_last_week(*, today: date) -> CompactResult:
     if not files:
         return CompactResult(applied=0, diff=None)
     body = "\n\n---\n\n".join(p.read_text() for p in files)
-    client = _client()
-    resp = client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=_MAX_TOKENS,
-        messages=[{"role": "user", "content": f"{_PROMPT}\n\n{body}"}],
-    )
     try:
-        text = resp.content[0].text
+        llm = _client()
+        event = asyncio.run(
+            llm.ainvoke(
+                messages=[HumanMessage(content=f"{_PROMPT}\n\n{body}")],
+                tools=[],
+            )
+        )
+        text = (event.content or "").strip() if event else ""
         diff = VaultDiff.from_json(text)
     except (json.JSONDecodeError, KeyError, IndexError) as e:
         log.warning("compactor parse failed: %s", e)
+        return CompactResult(applied=0, diff=None)
+    except Exception as e:
+        log.warning("compactor LLM call failed: %s", e)
         return CompactResult(applied=0, diff=None)
     applied = diff.apply(vault=Vault())
     return CompactResult(applied=applied, diff=diff)

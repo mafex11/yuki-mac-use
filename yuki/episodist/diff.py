@@ -53,6 +53,9 @@ class VaultDiff:
         now_iso = datetime.now(UTC).isoformat()
         for entry in self.entries:
             data = dict(entry.note)
+            if data.get("type") == "app":
+                log.info("skipping type:app entry; daily learner owns app guidance")
+                continue
             data.setdefault("created_at", now_iso)
             data.setdefault("updated_at", now_iso)
             data.setdefault("confidence", entry.confidence)
