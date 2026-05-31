@@ -4,6 +4,8 @@ Env overrides:
 - YUKI_VAULT_DIR — full path to the markdown vault (default ~/YukiVault)
 - YUKI_INDEX_DB  — full path to the SQLite index (default
   ~/Library/Application Support/Yuki/index.db)
+- YUKI_APP_SUPPORT — full path to the app-support directory (default
+  ~/Library/Application Support/Yuki)
 """
 
 from __future__ import annotations
