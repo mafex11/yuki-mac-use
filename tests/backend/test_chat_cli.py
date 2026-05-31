@@ -60,10 +60,10 @@ def test_post_chat_extracts_done_content() -> None:
     fake_client = MagicMock()
     fake_client.stream.return_value = fake_stream
 
-    out = _post_chat(
+    content, _badge = _post_chat(
         fake_client, "http://x", "tok", "hi", control=False
     )
-    assert out == "the answer is 4"
+    assert content == "the answer is 4"
     # Verify it hit /chat (not /chat/control)
     args, _ = fake_client.stream.call_args
     assert args[1].endswith("/chat")
@@ -80,10 +80,10 @@ def test_post_chat_control_uses_control_path() -> None:
     fake_client = MagicMock()
     fake_client.stream.return_value = fake_stream
 
-    out = _post_chat(
+    content, _ = _post_chat(
         fake_client, "http://x", "tok", "open notes", control=True
     )
-    assert out == "opened"
+    assert content == "opened"
     args, _ = fake_client.stream.call_args
     assert args[1].endswith("/chat/control")
 
@@ -99,10 +99,10 @@ def test_post_chat_propagates_error_event() -> None:
     fake_client = MagicMock()
     fake_client.stream.return_value = fake_stream
 
-    out = _post_chat(
+    content, _ = _post_chat(
         fake_client, "http://x", "tok", "hi", control=False
     )
-    assert "boom" in out
+    assert "boom" in content
 
 
 def test_post_chat_non_200_returns_error_string() -> None:
@@ -115,8 +115,8 @@ def test_post_chat_non_200_returns_error_string() -> None:
     fake_client = MagicMock()
     fake_client.stream.return_value = fake_stream
 
-    out = _post_chat(
+    content, _ = _post_chat(
         fake_client, "http://x", "tok", "hi", control=False
     )
-    assert "500" in out
-    assert "server died" in out
+    assert "500" in content
+    assert "server died" in content
