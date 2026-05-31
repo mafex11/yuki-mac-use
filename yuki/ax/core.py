@@ -489,6 +489,7 @@ _EARLY_TRAVERSAL_ATTRIBUTES = [
 # Phase-2 attributes fetched only for elements already identified as interactive.
 _LATE_TRAVERSAL_ATTRIBUTES = [
     Attribute.Subrole,
+    Attribute.RoleDescription,
     Attribute.Title,
     Attribute.Description,
     Attribute.Identifier,
@@ -542,6 +543,7 @@ def GetLateTraversalBatch(element: Any) -> dict:
 
     return {
         'subrole': raw.get(Attribute.Subrole) or '',
+        'role_description': raw.get(Attribute.RoleDescription) or '',
         'title': title,
         'description': description,
         'identifier': identifier,

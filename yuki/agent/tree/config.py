@@ -7,6 +7,7 @@ INTERACTIVE_ROLES = {
     'AXTextField',
     'AXTextArea',
     'AXComboBox',
+    'AXSearchField',
     'AXPopUpButton',
     'AXSlider',
     'AXIncrementor',

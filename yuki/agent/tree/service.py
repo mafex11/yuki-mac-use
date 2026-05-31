@@ -1,3 +1,4 @@
+from yuki.agent.tree.canonical import classify
 from yuki.agent.tree.config import (
     INTERACTIVE_ROLES,
     SCROLLABLE_ROLES,
@@ -45,6 +46,20 @@ class Tree:
         if active_window:
             if app := ax.GetRunningApplicationByBundleId(active_window.bundle_id):
                 ax.SetAttribute(app.Element, "AXEnhancedUserInterface", True)
+                # Catalyst apps (WhatsApp, Messages, News, Maps) expose a
+                # heavily-degraded AX tree by default. Setting AXManualAccessibility
+                # forces them to expose the full tree the same way VoiceOver does.
+                # Idempotent and safe on non-Catalyst apps (just no-ops there).
+                try:
+                    ax.SetAttribute(app.Element, "AXManualAccessibility", True)
+                    import os as _os
+                    if _os.environ.get("YUKI_DEBUG_TREE") == "1":
+                        logger.info(
+                            "AXManualAccessibility=True applied to %s",
+                            active_window.bundle_id,
+                        )
+                except Exception as _e:
+                    logger.debug("AXManualAccessibility set failed: %s", _e)
             bundle_ids.append(active_window.bundle_id)
             is_windowless = (
                 active_window.bundle_id != FINDER_BUNDLE_ID
@@ -60,12 +75,124 @@ class Tree:
             desktop_only_bundle_ids=desktop_only_bundle_ids,
         )
 
+        focused_rect = None
+        focused_element_attrs: dict | None = None
+        if active_window:
+            try:
+                app = ax.GetRunningApplicationByBundleId(active_window.bundle_id)
+                if app and (focused := app.FocusedUIElement) is not None:
+                    focused_rect = ax.GetRect(focused.Element)
+                    try:
+                        focused_element_attrs = ax.GetLateTraversalBatch(focused.Element)
+                        focused_element_attrs['role'] = ax.GetAttribute(
+                            focused.Element, ax.Attribute.Role
+                        ) or ''
+                    except Exception:
+                        focused_element_attrs = None
+            except Exception:
+                focused_rect = None
+
+        for node in interactive_nodes:
+            node.is_focused = self._matches_focus(node.bounding_box, focused_rect)
+            node.canonical = classify(node, is_focused=node.is_focused)
+
+        if (
+            focused_rect is not None
+            and focused_element_attrs is not None
+            and not any(n.is_focused for n in interactive_nodes)
+        ):
+            role = focused_element_attrs.get('role') or 'AXTextField'
+            if role in ("AXTextField", "AXTextArea", "AXComboBox"):
+                bbox = BoundingBox.from_bounding_rectangle(focused_rect)
+                fmeta: dict[str, str] = {}
+                if focused_element_attrs.get('subrole'):
+                    fmeta['subrole'] = focused_element_attrs['subrole']
+                if focused_element_attrs.get('role_description'):
+                    fmeta['role_description'] = focused_element_attrs['role_description']
+                if focused_element_attrs.get('placeholder'):
+                    fmeta['placeholder'] = focused_element_attrs['placeholder']
+                if focused_element_attrs.get('value'):
+                    fmeta['value'] = str(focused_element_attrs['value'])
+                if focused_element_attrs.get('identifier'):
+                    fmeta['axidentifier'] = focused_element_attrs['identifier']
+                synth = TreeElementNode(
+                    bounding_box=bbox,
+                    center=bbox.get_center(),
+                    name=focused_element_attrs.get('label') or 'focused field',
+                    control_type=role,
+                    window_name=active_window.name if active_window else '',
+                    metadata=fmeta,
+                    is_focused=True,
+                )
+                synth.canonical = classify(synth, is_focused=True)
+                interactive_nodes.insert(0, synth)
+                logger.info(
+                    "TREE_SYNTH: injected focused %s @ %s (no walked node matched)",
+                    synth.canonical, synth.center.to_string(),
+                )
+
+        import os as _os
+        if _os.environ.get("YUKI_DEBUG_TREE") == "1":
+            tf = [n for n in interactive_nodes if n.control_type == "AXTextField"]
+            logger.info(
+                "TREE_DEBUG: focused_rect=%s | %d AXTextField nodes | %d total interactive",
+                focused_rect, len(tf), len(interactive_nodes),
+            )
+            for n in tf:
+                logger.info(
+                    "  TF coords=%s focused=%s canonical=%s name=%r meta=%s",
+                    n.center.to_string(), n.is_focused, n.canonical,
+                    n.name, dict(n.metadata),
+                )
+            if active_window:
+                fg_nodes = [
+                    n for n in interactive_nodes
+                    if n.window_name and active_window.name
+                    and n.window_name in active_window.name
+                ]
+                if fg_nodes:
+                    role_counts: dict[str, int] = {}
+                    for n in fg_nodes:
+                        role_counts[n.control_type] = role_counts.get(n.control_type, 0) + 1
+                    logger.info(
+                        "  FOREGROUND %s role breakdown: %s",
+                        active_window.bundle_id, dict(sorted(role_counts.items())),
+                    )
+
         return TreeState(
             status=True,
             interactive_nodes=interactive_nodes,
             scrollable_nodes=scrollable_nodes,
             dom_informative_nodes=dom_informative_nodes,
         )
+
+    @staticmethod
+    def _matches_focus(node_bbox: BoundingBox, focused_rect) -> bool:
+        """Match a node's bbox against the focused element's rect.
+
+        We can't use AXUIElementRef equality because the walker stores its own
+        copies. We can't use exact bbox equality because the walker clips via
+        iou_bounding_box, so stored bboxes can differ from the focused element's
+        raw rect. Instead: the focused rect's center must lie inside the node's
+        bbox, AND the dimensions must be roughly comparable (within 10px).
+        """
+        if focused_rect is None:
+            return False
+        try:
+            fl, ft = int(focused_rect.left), int(focused_rect.top)
+            fw, fh = int(focused_rect.width), int(focused_rect.height)
+            fcx, fcy = fl + fw // 2, ft + fh // 2
+            inside = (
+                node_bbox.left <= fcx <= node_bbox.right
+                and node_bbox.top <= fcy <= node_bbox.bottom
+            )
+            similar = (
+                abs(fw - node_bbox.width) <= 10
+                and abs(fh - node_bbox.height) <= 10
+            )
+            return inside and similar
+        except Exception:
+            return False
 
     def get_window_wise_nodes(
         self,
@@ -441,16 +568,31 @@ class Tree:
                 if late.get('identifier'):
                     metadata['axidentifier'] = late['identifier']
 
-                interactive_nodes.append(
-                    TreeElementNode(
-                        bounding_box=bounding_box,
-                        center=center,
-                        name=label,
-                        control_type=role,
-                        window_name=window_name,
-                        metadata=metadata,
-                    )
+                if late.get('subrole'):
+                    metadata['subrole'] = late['subrole']
+                if late.get('role_description'):
+                    metadata['role_description'] = late['role_description']
+
+                axid_str = str(late.get('identifier') or '')
+                name_str = str(label or '')
+                is_private_api = (
+                    axid_str.startswith('_SC_')
+                    or axid_str.startswith('_NS_')
+                    or name_str.startswith('_SC_')
+                    or name_str.startswith('_NS_')
                 )
+
+                if not is_private_api:
+                    interactive_nodes.append(
+                        TreeElementNode(
+                            bounding_box=bounding_box,
+                            center=center,
+                            name=label,
+                            control_type=role,
+                            window_name=window_name,
+                            metadata=metadata,
+                        )
+                    )
                 if current_is_browser:
                     self._dom_correction(
                         attrs, interactive_nodes, window_name, main_window_bounding_box

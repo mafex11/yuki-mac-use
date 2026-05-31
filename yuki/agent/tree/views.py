@@ -25,12 +25,36 @@ class TreeState:
         if not self.interactive_nodes and self.status:
             parts.append(EMPTY_MESSAGE)
             return "\n".join(parts)
-        # TOON-like format: Pipe-separated values with clear header
-        # Using abbreviations in header to save tokens
-        header = "# id|window|control_type|name|coords|metadata"
+
+        focused = next(
+            (n for n in self.interactive_nodes
+             if n.is_focused and n.canonical in {
+                 "primary_input", "url_bar", "search_field", "text_input"
+             }),
+            None,
+        )
+        if focused is not None:
+            value = focused.metadata.get("value") or ""
+            placeholder = focused.metadata.get("placeholder") or ""
+            parts.append(
+                "<focused_input>\n"
+                f"canonical={focused.canonical} window={focused.window_name} "
+                f"role={focused.control_type} name={focused.name!r} "
+                f"coords={focused.center.to_string()} "
+                f"value={value!r} placeholder={placeholder!r}\n"
+                "</focused_input>"
+            )
+
+        header = "# id|window|control_type|canonical|name|coords|focused|metadata"
         rows = [header]
         for idx, node in enumerate(self.interactive_nodes):
-            row = f"{idx}|{node.window_name}|{node.control_type}|{node.name}|{node.center.to_string()}|{json.dumps(node.metadata)}"
+            canonical = node.canonical or "-"
+            focused_mark = "YES" if node.is_focused else "-"
+            row = (
+                f"{idx}|{node.window_name}|{node.control_type}|{canonical}|"
+                f"{node.name}|{node.center.to_string()}|{focused_mark}|"
+                f"{json.dumps(node.metadata)}"
+            )
             rows.append(row)
         parts.append("\n".join(rows))
         return "\n".join(parts)
@@ -113,6 +137,8 @@ class TreeElementNode:
     control_type: str=''
     window_name: str=''
     metadata:dict[str,Any]=field(default_factory=dict)
+    is_focused: bool=False
+    canonical: str|None=None
 
     def update_from_node(self,node:'TreeElementNode'):
         self.name=node.name
