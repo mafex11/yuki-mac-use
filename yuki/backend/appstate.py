@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 from typing import Any
 
@@ -56,6 +57,8 @@ def save(cfg: dict[str, Any]) -> None:
 
 
 def _keychain_get(account: str) -> str | None:  # pragma: no cover -- real Keychain
+    if account not in _KEY_ENV:
+        return None
     try:
         out = subprocess.run(
             ["security", "find-generic-password",
@@ -65,12 +68,11 @@ def _keychain_get(account: str) -> str | None:  # pragma: no cover -- real Keych
         if out.returncode == 0:
             return out.stdout.strip() or None
     except Exception as e:
-        log.warning("keychain read failed for %s: %s", account, e)
+        log.warning("keychain read failed for %s: %s", account, type(e).__name__)
     return None
 
 
 def api_key_for(provider: str) -> str | None:
-    import os
     env_name = _KEY_ENV.get(provider, "")
     if env_name:
         val = os.environ.get(env_name)

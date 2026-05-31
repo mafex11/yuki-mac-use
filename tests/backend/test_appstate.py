@@ -32,3 +32,10 @@ def test_api_key_none_when_missing(tmp_path, monkeypatch):
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.setattr(appstate, "_keychain_get", lambda account: None)
     assert appstate.api_key_for("google") is None
+
+
+def test_api_key_from_keychain(tmp_path, monkeypatch):
+    monkeypatch.setenv("YUKI_APP_SUPPORT", str(tmp_path))
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    monkeypatch.setattr(appstate, "_keychain_get", lambda account: "keychain-key-456")
+    assert appstate.api_key_for("google") == "keychain-key-456"
