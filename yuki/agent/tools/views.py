@@ -238,3 +238,13 @@ class Desktop(SharedBaseModel):
         default=None,
         examples=["My Workspace", "Project Alpha"]
     )
+
+class ListAppNotes(SharedBaseModel):
+    pass
+
+class ReadAppNote(SharedBaseModel):
+    bundle_id: str = Field(
+        ...,
+        description="Bundle id of the app whose note to read, exactly as returned by list_app_notes (e.g. 'net.whatsapp.WhatsApp', 'com.google.Chrome').",
+        examples=['net.whatsapp.WhatsApp', 'com.google.Chrome', 'com.apple.Safari']
+    )

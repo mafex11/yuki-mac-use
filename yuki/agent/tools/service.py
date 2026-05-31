@@ -1,9 +1,11 @@
-from yuki.agent.tools.views import Click, Type, Scroll, Move, Shortcut, Wait, Scrape, Done, Shell, Memory, App, MultiSelect, MultiEdit, Desktop
+from yuki.agent.tools.views import Click, Type, Scroll, Move, Shortcut, Wait, Scrape, Done, Shell, Memory, App, MultiSelect, MultiEdit, Desktop, ListAppNotes, ReadAppNote
 from yuki.agent.desktop.service import Desktop as _Desktop
 from typing import Literal,Optional
 from yuki.tools import Tool
 from pathlib import Path
 from time import sleep
+from yuki.memory import frontmatter as _fm
+from yuki.memory import paths as _paths
 
 memory_path=Path.cwd()/'.memories'
 memory_path.mkdir(parents=True, exist_ok=True)
@@ -325,3 +327,70 @@ def scrape_tool(url:str,**kwargs)->str:
     header_status = "Reached top" if vertical_scroll_percent <= 0 else "Scroll up to see more"
     footer_status = "Reached bottom" if vertical_scroll_percent >= 100 else "Scroll down to see more"
     return f'URL:{url}\nContent:\n{header_status}\n{content}\n{footer_status}'
+
+
+def _first_meaningful_line(body: str, max_len: int = 140) -> str:
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith("---"):
+            continue
+        return line[:max_len]
+    return ""
+
+
+@Tool('list_app_notes', model=ListAppNotes)
+def list_app_notes(**kwargs) -> str:
+    '''
+    List every app note Yuki has accumulated guidance for. Returns one line per
+    app: `bundle_id  |  name  |  one-line summary`.
+
+    Call this BEFORE controlling an unfamiliar app, or whenever the user names
+    an app you haven't worked with this session. If the listing shows a
+    matching note, follow up with `read_app_note(bundle_id=...)` to load the
+    full guidance. Notes encode hard-won knowledge from past runs (correct
+    coordinates, working shortcuts, things to avoid) — they are usually more
+    reliable than guessing from the AX tree alone.
+    '''
+    apps_dir = _paths.vault_dir() / "40-Apps"
+    if not apps_dir.exists():
+        return "No 40-Apps directory found. No app guidance available yet."
+    rows: list[str] = []
+    for path in sorted(apps_dir.glob("*.md")):
+        try:
+            meta, body = _fm.read_file(path)
+        except Exception:
+            continue
+        if meta.get("type") != "app":
+            continue
+        bundle = str(meta.get("bundle_id") or "").strip()
+        name = str(meta.get("name") or path.stem).strip()
+        if not bundle:
+            continue
+        summary = _first_meaningful_line(body)
+        rows.append(f"{bundle}  |  {name}  |  {summary}")
+    if not rows:
+        return "No app notes found in 40-Apps. No guidance available yet."
+    header = "# bundle_id  |  name  |  summary"
+    return "\n".join([header, *rows])
+
+
+@Tool('read_app_note', model=ReadAppNote)
+def read_app_note(bundle_id: str, **kwargs) -> str:
+    '''
+    Read the full body of the 40-Apps note for the given bundle_id. Use this
+    after `list_app_notes` returns a relevant entry. The body contains
+    confirmed-working coordinates, sequences, shortcuts, and pitfalls for that
+    specific app. Treat it as authoritative guidance — prefer it over guessing.
+    '''
+    apps_dir = _paths.vault_dir() / "40-Apps"
+    if not apps_dir.exists():
+        return f"No app note found for bundle_id={bundle_id!r} (40-Apps missing)."
+    for path in apps_dir.glob("*.md"):
+        try:
+            meta, body = _fm.read_file(path)
+        except Exception:
+            continue
+        if meta.get("type") == "app" and str(meta.get("bundle_id") or "") == bundle_id:
+            name = str(meta.get("name") or path.stem)
+            return f"# {name} ({bundle_id})\n\n{body.strip()}"
+    return f"No app note found for bundle_id={bundle_id!r}."
