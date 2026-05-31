@@ -72,6 +72,8 @@ def create_app() -> FastAPI:
         chat,
         health,
         memory,
+        provider,
+        route,
         safety,
         scan,
         settings,
@@ -88,6 +90,8 @@ def create_app() -> FastAPI:
     app.include_router(scan.router, dependencies=[Depends(require_token)])
     app.include_router(safety.router, dependencies=[Depends(require_token)])
     app.include_router(chat.router, dependencies=[Depends(require_token)])
+    app.include_router(route.router, dependencies=[Depends(require_token)])
+    app.include_router(provider.router, dependencies=[Depends(require_token)])
 
     static_dir = Path(__file__).parent / "static"
     if static_dir.exists():
