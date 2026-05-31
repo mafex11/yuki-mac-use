@@ -45,6 +45,11 @@ def _build_observer():
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     get_runtime()
+    try:
+        from yuki.migrations import run_migrations
+        run_migrations()
+    except Exception as e:
+        log.warning("migrations failed: %s", e)
     daemon = _build_observer()
     if daemon is not None:
         try:
