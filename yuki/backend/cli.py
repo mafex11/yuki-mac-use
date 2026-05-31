@@ -37,7 +37,38 @@ def _load_env_files() -> list[Path]:
     return loaded
 
 
+def _watch_parent_death() -> None:
+    """Exit when the spawning parent (Swift app) dies. macOS lacks
+    PR_SET_PDEATHSIG, so poll getppid(): re-parenting to launchd (pid 1)
+    means our parent is gone."""
+    import os
+    import threading
+    import time
+
+    original_ppid = os.getppid()
+
+    def _poll() -> None:
+        while True:
+            time.sleep(2)
+            current_ppid = os.getppid()
+            if current_ppid != original_ppid or current_ppid == 1:
+                os._exit(0)
+
+    # daemon=True: Python kills this on exit; no explicit stop needed.
+    t = threading.Thread(target=_poll, daemon=True)
+    t.start()
+
+
 def main() -> None:
+    import argparse
+    from yuki.backend import auth
+    from yuki.memory import paths
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--uds", action="store_true",
+                        help="bind a Unix Domain Socket instead of TCP")
+    args = parser.parse_args()
+
     loaded = _load_env_files()
     if loaded:
         print(
@@ -45,27 +76,28 @@ def main() -> None:
             file=sys.stderr,
         )
 
+    if args.uds:
+        auth.set_uds_mode(True)
+        sock = paths.socket_path()
+        sock.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            sock.unlink()
+        except FileNotFoundError:
+            pass
+        _watch_parent_death()
+        print(f"yuki: backend listening on UDS {sock}", file=sys.stderr)
+        uvicorn.run(create_app(), uds=str(sock), log_level="info")
+        return
+
     token = os.environ.get("YUKI_AUTH_TOKEN")
     if not token:
-        print(
-            "YUKI_AUTH_TOKEN env var is required.\n"
-            "Add it to .env (in cwd or project root) or export it in your shell:\n"
-            "  echo \"YUKI_AUTH_TOKEN=$(python3 -c 'import secrets; "
-            "print(secrets.token_hex(32))')\" >> .env",
-            file=sys.stderr,
-        )
+        print("YUKI_AUTH_TOKEN env var is required for TCP mode.", file=sys.stderr)
         sys.exit(2)
     set_active_token(token)
     port = int(os.environ.get("YUKI_PORT", "0"))
     if port:
         print(
             f"yuki: backend listening on http://127.0.0.1:{port}",
-            file=sys.stderr,
-        )
-    else:
-        print(
-            "yuki: backend starting on a random port — "
-            "check the uvicorn line below for the actual port",
             file=sys.stderr,
         )
     uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="info")

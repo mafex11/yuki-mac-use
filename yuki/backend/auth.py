@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 
 _token: str | None = None
+_uds_mode = False
 
 
 class AuthError(Exception):
@@ -24,6 +25,24 @@ def get_active_token() -> str | None:
     return _token
 
 
+def set_uds_mode(enabled: bool) -> None:
+    global _uds_mode
+    _uds_mode = enabled
+
+
+def is_uds_mode() -> bool:
+    return _uds_mode
+
+
 def verify(presented: str) -> None:
+    if _uds_mode:
+        return
     if _token is None or not secrets.compare_digest(_token, presented):
         raise AuthError("invalid token")
+
+
+def reset_auth_state() -> None:
+    """Reset module globals — used by tests / runtime reset."""
+    global _token, _uds_mode
+    _token = None
+    _uds_mode = False

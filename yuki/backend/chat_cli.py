@@ -43,6 +43,17 @@ def _resolve_url() -> str:
     return f"http://127.0.0.1:{port}"
 
 
+def _make_client_and_base() -> tuple[httpx.Client, str]:
+    """Return (client, base_url). Prefer UDS when YUKI_UDS=1 or the socket
+    exists; fall back to TCP."""
+    from yuki.memory import paths
+    sock = paths.socket_path()
+    if os.environ.get("YUKI_UDS") == "1" or sock.exists():
+        transport = httpx.HTTPTransport(uds=str(sock))
+        return httpx.Client(transport=transport), "http://yuki"
+    return httpx.Client(), _resolve_url()
+
+
 def _print_help() -> None:
     print(
         "\nCommands:\n"
@@ -148,9 +159,9 @@ def main() -> None:
             file=sys.stderr,
         )
         sys.exit(2)
-    base_url = _resolve_url()
+    client, base_url = _make_client_and_base()
 
-    with httpx.Client() as client:
+    with client:
         ok, detail = _check_backend(client, base_url)
         if not ok:
             print(

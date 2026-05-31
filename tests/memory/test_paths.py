@@ -40,3 +40,26 @@ def test_section_dirs() -> None:
     assert "60-Episodes" in sections
     assert "90-Inbox" in sections
     assert len(sections) == 9
+
+
+def test_app_support_dir_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("YUKI_APP_SUPPORT", raising=False)
+    monkeypatch.setenv("HOME", "/Users/test")
+    assert paths.app_support_dir() == Path(
+        "/Users/test/Library/Application Support/Yuki"
+    )
+
+
+def test_app_support_dir_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YUKI_APP_SUPPORT", "/tmp/yuki")
+    assert paths.app_support_dir() == Path("/tmp/yuki")
+
+
+def test_socket_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YUKI_APP_SUPPORT", "/tmp/yuki")
+    assert paths.socket_path() == Path("/tmp/yuki/yuki.sock")
+
+
+def test_chat_history_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YUKI_APP_SUPPORT", "/tmp/yuki")
+    assert paths.chat_history_path() == Path("/tmp/yuki/chat_history.jsonl")

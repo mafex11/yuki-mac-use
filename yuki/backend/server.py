@@ -19,6 +19,9 @@ log = logging.getLogger("yuki")
 
 
 def require_token(authorization: Annotated[str, Header()] = "") -> None:
+    from yuki.backend import auth
+    if auth.is_uds_mode():
+        return
     if not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="missing bearer token")
     token = authorization.split(" ", 1)[1].strip()
@@ -45,6 +48,11 @@ def _build_observer():
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     get_runtime()
+    try:
+        from yuki.migrations import run_migrations
+        run_migrations()
+    except Exception as e:
+        log.warning("migrations failed: %s", e)
     daemon = _build_observer()
     if daemon is not None:
         try:
@@ -72,6 +80,8 @@ def create_app() -> FastAPI:
         chat,
         health,
         memory,
+        provider,
+        route,
         safety,
         scan,
         settings,
@@ -88,6 +98,8 @@ def create_app() -> FastAPI:
     app.include_router(scan.router, dependencies=[Depends(require_token)])
     app.include_router(safety.router, dependencies=[Depends(require_token)])
     app.include_router(chat.router, dependencies=[Depends(require_token)])
+    app.include_router(route.router, dependencies=[Depends(require_token)])
+    app.include_router(provider.router, dependencies=[Depends(require_token)])
 
     static_dir = Path(__file__).parent / "static"
     if static_dir.exists():

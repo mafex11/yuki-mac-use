@@ -4,6 +4,8 @@ Env overrides:
 - YUKI_VAULT_DIR — full path to the markdown vault (default ~/YukiVault)
 - YUKI_INDEX_DB  — full path to the SQLite index (default
   ~/Library/Application Support/Yuki/index.db)
+- YUKI_APP_SUPPORT — full path to the app-support directory (default
+  ~/Library/Application Support/Yuki)
 """
 
 from __future__ import annotations
@@ -40,6 +42,21 @@ def index_db_path() -> Path:
     if override:
         return Path(override)
     return _home() / "Library" / "Application Support" / "Yuki" / "index.db"
+
+
+def app_support_dir() -> Path:
+    override = os.environ.get("YUKI_APP_SUPPORT")
+    if override:
+        return Path(override)
+    return _home() / "Library" / "Application Support" / "Yuki"
+
+
+def socket_path() -> Path:
+    return app_support_dir() / "yuki.sock"
+
+
+def chat_history_path() -> Path:
+    return app_support_dir() / "chat_history.jsonl"
 
 
 def section_path(section: str) -> Path:
