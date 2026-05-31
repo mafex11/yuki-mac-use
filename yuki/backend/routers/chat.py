@@ -162,7 +162,12 @@ async def _stream_control(
         yield {"type": "error", "content": str(e)}
         llm = ChatStub()  # type: ignore[assignment]
 
-    agent = Agent(llm=llm)
+    import asyncio as _asyncio
+
+    from yuki.backend.event_bridge import QueueEventSubscriber, event_to_sse
+
+    queue: _asyncio.Queue = _asyncio.Queue()
+    agent = Agent(llm=llm, event_subscriber=QueueEventSubscriber(queue))
 
     foreground_bundle = ""
     try:
@@ -178,8 +183,20 @@ async def _stream_control(
     outcome = "success"
     failure_mode = FailureMode.NONE
     content = ""
+
+    task = _asyncio.create_task(agent.ainvoke(task=framed))
+    while True:
+        try:
+            ev = await _asyncio.wait_for(queue.get(), timeout=0.25)
+            ev_sse = event_to_sse(ev)
+            if ev_sse.get("type") == "done":
+                continue
+            yield ev_sse
+        except _asyncio.TimeoutError:
+            if task.done():
+                break
     try:
-        result = await agent.ainvoke(task=framed)
+        result = await task
         content = getattr(result, "content", "") or ""
         if not getattr(result, "is_done", True):
             outcome = "failure"
