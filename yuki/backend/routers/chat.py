@@ -49,17 +49,27 @@ def _frame_user_task(message: str, hot_context: str) -> str:
 async def _stream_chat(
     message: str, conversation_id: str | None
 ) -> AsyncIterator[dict[str, Any]]:
-    """Pure LLM round-trip. No desktop. No tool calls."""
+    """Pure LLM round-trip with persistent global history."""
+    import logging
+
     from yuki.memory import load_hot_context
-    from yuki.messages import HumanMessage, SystemMessage
+    from yuki.messages import AIMessage, HumanMessage, SystemMessage
     from yuki.providers.factory import ProviderConfigError, make_llm
+    from yuki.runtime.compaction import (
+        append_history,
+        compact_messages_async,
+        get_tracker,
+        load_history,
+        replace_history,
+    )
+
+    log = logging.getLogger("yuki")
 
     rt = get_runtime()
     rec = TrajectoryRecorder(conversation_id=conversation_id)
     rec.record({"type": "user", "text": message})
 
     hot = load_hot_context(rt.vault).strip()
-    # Build cache markers; production providers (anthropic) honor them, others ignore.
     _ = build_cached_system_blocks(
         base_prompt=_BASE_SYSTEM_PROMPT, hot_context=hot
     )
@@ -73,10 +83,25 @@ async def _stream_chat(
         yield err
         return
 
-    messages = [
-        SystemMessage(content=_BASE_SYSTEM_PROMPT),
-        HumanMessage(content=framed),
-    ]
+    tracker = get_tracker(model=getattr(llm, "model_name", "") or "")
+
+    history = load_history()
+    user_msg = HumanMessage(content=framed)
+    messages: list = [SystemMessage(content=_BASE_SYSTEM_PROMPT), *history, user_msg]
+
+    tracker.update(messages)
+    if tracker.should_auto_compact:
+        log.info(
+            f"auto-compacting at {tracker.percent_used:.0f}% "
+            f"({tracker.used_tokens} tokens)"
+        )
+        compacted = await compact_messages_async([*history, user_msg])
+        # Persist the compacted form (without the system prompt; system is rebuilt every turn).
+        compacted_no_sys = [m for m in compacted if not isinstance(m, SystemMessage)]
+        replace_history(compacted_no_sys)
+        messages = [SystemMessage(content=_BASE_SYSTEM_PROMPT), *compacted_no_sys]
+        tracker.update(messages)
+
     try:
         result = await llm.ainvoke(messages=messages, tools=[])
     except Exception as e:
@@ -86,7 +111,22 @@ async def _stream_chat(
         return
 
     text = getattr(result, "content", None) or ""
-    final = {"type": "done", "content": text}
+
+    # Persist this turn (user msg + AI reply) to global history.
+    try:
+        append_history([user_msg, AIMessage(content=text)])
+    except Exception as e:
+        log.warning("history append failed: %s", e)
+
+    # Update tracker now that the new turn is on disk.
+    tracker.update([*messages, AIMessage(content=text)])
+
+    final = {
+        "type": "done",
+        "content": text,
+        "ctx_badge": tracker.badge(),
+        "ctx_percent": int(tracker.percent_used),
+    }
     rec.record(final)
     yield final
 
@@ -95,10 +135,19 @@ async def _stream_control(
     message: str, conversation_id: str | None
 ) -> AsyncIterator[dict[str, Any]]:
     """Full MacOS-Use desktop loop. Slow, needs accessibility/screen permissions."""
+    import logging
+    import time
+    from datetime import UTC, datetime
+
     from yuki.agent import Agent
+    from yuki.feedback.recorder import FailureMode, TaskRecord, append_task_record
     from yuki.memory import load_hot_context
     from yuki.providers.factory import ProviderConfigError, make_llm
     from yuki.providers.stub import ChatStub
+
+    log = logging.getLogger("yuki")
+    log.info("=" * 60)
+    log.info(f"[/control] task: {message!r} (conv={conversation_id})")
 
     rt = get_runtime()
     rec = TrajectoryRecorder(conversation_id=conversation_id)
@@ -114,8 +163,59 @@ async def _stream_control(
         llm = ChatStub()  # type: ignore[assignment]
 
     agent = Agent(llm=llm)
-    result = await agent.ainvoke(task=framed)
-    final = {"type": "done", "content": getattr(result, "content", "")}
+
+    foreground_bundle = ""
+    try:
+        win = agent.desktop.get_foreground_window()
+        if win:
+            foreground_bundle = win.bundle_id or ""
+    except Exception:
+        foreground_bundle = ""
+    log.info(f"[/control] foreground app: {foreground_bundle or '(none)'}")
+
+    started = datetime.now(UTC)
+    t0 = time.monotonic()
+    outcome = "success"
+    failure_mode = FailureMode.NONE
+    content = ""
+    try:
+        result = await agent.ainvoke(task=framed)
+        content = getattr(result, "content", "") or ""
+        if not getattr(result, "is_done", True):
+            outcome = "failure"
+            failure_mode = FailureMode.AGENT_STEP_LIMIT
+    except Exception as e:
+        outcome = "failure"
+        failure_mode = FailureMode.PROVIDER_ERROR
+        content = f"agent error: {e}"
+
+    duration_s = round(time.monotonic() - t0, 2)
+    steps_used = getattr(getattr(agent, "state", None), "step", 0)
+    apps_involved = [foreground_bundle] if foreground_bundle else []
+    log.info(
+        f"[/control] done in {duration_s}s "
+        f"({steps_used} steps, outcome={outcome}, failure_mode={failure_mode.value})"
+    )
+
+    try:
+        append_task_record(
+            TaskRecord(
+                task=message,
+                conversation_id=conversation_id or "",
+                started_at=started,
+                duration_s=duration_s,
+                steps_used=int(steps_used or 0),
+                outcome=outcome,
+                apps_involved=apps_involved,
+                actions=[],
+                failure_mode=failure_mode,
+                recovery_attempts=0,
+            )
+        )
+    except Exception:
+        pass
+
+    final = {"type": "done", "content": content}
     rec.record(final)
     yield final
 
@@ -148,3 +248,77 @@ async def post_chat_control(req: ChatRequest) -> Any:
         raise HTTPException(status_code=400, detail="empty message")
     events = _stream_control(req.message, req.conversation_id)
     return EventSourceResponse(_to_sse(events))
+
+
+@router.post("/compact")
+async def post_compact() -> dict[str, Any]:
+    """LLM-summarize the global chat history; replaces it with the summary."""
+    from yuki.messages import SystemMessage
+    from yuki.providers.factory import ProviderConfigError, make_llm
+    from yuki.runtime.compaction import (
+        compact_messages_async,
+        get_tracker,
+        load_history,
+        replace_history,
+    )
+
+    history = load_history()
+    if not history:
+        tracker = get_tracker()
+        tracker.update([])
+        return {
+            "ok": True,
+            "compacted": False,
+            "reason": "history empty",
+            "ctx_badge": tracker.badge(),
+            "ctx_percent": int(tracker.percent_used),
+        }
+
+    try:
+        llm = make_llm()
+        model = getattr(llm, "model_name", "") or ""
+    except ProviderConfigError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+
+    tracker = get_tracker(model=model)
+    compacted = await compact_messages_async(history, keep_recent=5)
+    compacted_no_sys = [m for m in compacted if not isinstance(m, SystemMessage)]
+    replace_history(compacted_no_sys)
+    tracker.update(compacted_no_sys)
+    return {
+        "ok": True,
+        "compacted": True,
+        "ctx_badge": tracker.badge(),
+        "ctx_percent": int(tracker.percent_used),
+    }
+
+
+@router.post("/clear")
+async def post_clear() -> dict[str, Any]:
+    """Wipe the global chat history. Resets context to 0%."""
+    from yuki.runtime.compaction import clear_history, get_tracker
+
+    clear_history()
+    tracker = get_tracker()
+    tracker.update([])
+    return {
+        "ok": True,
+        "ctx_badge": tracker.badge(),
+        "ctx_percent": int(tracker.percent_used),
+    }
+
+
+@router.get("/status")
+async def get_status() -> dict[str, Any]:
+    """Report current context usage without sending a message."""
+    from yuki.runtime.compaction import get_tracker, load_history
+
+    tracker = get_tracker()
+    tracker.update(load_history())
+    return {
+        "ctx_badge": tracker.badge(),
+        "ctx_percent": int(tracker.percent_used),
+        "used_tokens": tracker.used_tokens,
+        "window": tracker.window,
+        "model": tracker.model,
+    }
