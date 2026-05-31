@@ -15,7 +15,8 @@ from yuki.providers.factory import (
 
 @pytest.fixture(autouse=True)
 def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Pin index dir so settings.json doesn't leak between tests."""
+    """Pin app support dir so app_state.json doesn't leak between tests."""
+    monkeypatch.setenv("YUKI_APP_SUPPORT", str(tmp_path))
     monkeypatch.setenv("YUKI_INDEX_DB", str(tmp_path / "index.db"))
     monkeypatch.delenv("YUKI_LLM_PROVIDER", raising=False)
     monkeypatch.delenv("YUKI_LLM_MODEL", raising=False)
@@ -24,15 +25,17 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
 
 
-def test_default_provider_is_anthropic_and_errors_without_key() -> None:
+def test_default_provider_is_google_and_errors_without_key() -> None:
+    """Default is now google (from appstate), not anthropic."""
     with pytest.raises(ProviderConfigError) as exc:
         make_llm()
-    assert "ANTHROPIC_API_KEY" in str(exc.value)
+    assert "GOOGLE_API_KEY" in str(exc.value)
 
 
 def test_anthropic_with_key_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force anthropic via arg (default is now google)."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-    llm = make_llm()
+    llm = make_llm(provider="anthropic")
     assert llm.provider == "anthropic"
     assert llm.model_name == "claude-sonnet-4-6"
 
@@ -83,19 +86,17 @@ def test_unknown_provider_raises() -> None:
     assert "Unknown" in str(exc.value)
 
 
-def test_settings_drives_provider(
+def test_appstate_drives_provider(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """When settings.json says ollama, factory picks ollama."""
+    """When app_state.json says ollama, factory picks ollama."""
     import json
 
-    settings_path = tmp_path / "settings.json"
-    settings_path.write_text(
+    appstate_path = tmp_path / "app_state.json"
+    appstate_path.write_text(
         json.dumps({"llm_provider": "ollama", "llm_model": "qwen3-vl:8b"})
     )
-    monkeypatch.setenv(
-        "YUKI_INDEX_DB", str(tmp_path / "index.db")
-    )  # parent of settings.json
+    monkeypatch.setenv("YUKI_APP_SUPPORT", str(tmp_path))
     llm = make_llm()
     assert llm.provider == "ollama"
 

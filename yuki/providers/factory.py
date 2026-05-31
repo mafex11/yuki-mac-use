@@ -1,8 +1,10 @@
-"""LLM provider factory — pick a ChatModel from settings + env.
+"""LLM provider factory — pick a ChatModel from app_state + env.
 
 Resolution order (last wins):
-  1. settings.json (~/Library/Application Support/Yuki/settings.json)
+  1. app_state.json (~/Library/Application Support/Yuki/app_state.json)
   2. YUKI_LLM_PROVIDER / YUKI_LLM_MODEL env vars
+
+API keys are resolved from env first, then Keychain (bundled app mode).
 
 Raises ProviderConfigError with a fix hint when an invalid combination is
 requested (e.g. google selected but GOOGLE_API_KEY unset).
@@ -32,10 +34,10 @@ class ProviderConfigError(RuntimeError):
 
 
 def _resolve(provider_arg: str | None, model_arg: str | None) -> tuple[str, str]:
-    """Resolve provider + model from args > env > settings > defaults.
+    """Resolve provider + model from args > env > appstate > defaults.
 
     If the caller forces a provider (via arg or env) without naming a model,
-    we use that provider's default — NOT the settings.json model, which may
+    we use that provider's default — NOT the app_state.json model, which may
     belong to a different provider.
     """
     forced_provider = provider_arg or os.environ.get("YUKI_LLM_PROVIDER")
@@ -44,9 +46,13 @@ def _resolve(provider_arg: str | None, model_arg: str | None) -> tuple[str, str]
     settings: dict[str, Any] = {}
     if forced_provider is None or forced_model is None:
         try:
-            from yuki.backend.routers.settings import _load as _load_settings
+            from yuki.backend import appstate
 
-            settings = _load_settings()
+            cfg = appstate.load()
+            settings = {
+                "llm_provider": cfg.get("llm_provider"),
+                "llm_model": cfg.get("llm_model"),
+            }
         except Exception:
             settings = {}
 
@@ -75,6 +81,15 @@ def make_llm(
         **kwargs: Forwarded to the provider constructor (e.g. temperature).
     """
     p, m = _resolve(provider, model)
+
+    # Inject api keys from appstate/Keychain if not already in env
+    if p in ("google", "anthropic"):
+        from yuki.backend import appstate
+
+        key = appstate.api_key_for(p)
+        if key:
+            env_name = "GOOGLE_API_KEY" if p == "google" else "ANTHROPIC_API_KEY"
+            os.environ.setdefault(env_name, key)
 
     if p == "anthropic":
         if not os.environ.get("ANTHROPIC_API_KEY"):
