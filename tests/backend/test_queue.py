@@ -30,3 +30,15 @@ async def test_depth_reports_waiting():
     await q.submit(slow)
     await q.submit(slow)
     assert q.depth() >= 1
+
+
+async def test_job_exception_propagates():
+    q = ControlQueue()
+
+    async def boom():
+        raise ValueError("test")
+
+    fut = await q.submit(boom)
+    with pytest.raises(ValueError, match="test"):
+        await fut
+    assert q.depth() == 0

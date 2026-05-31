@@ -11,6 +11,7 @@ class ControlQueue:
     def __init__(self) -> None:
         self._lock = asyncio.Lock()
         self._waiting = 0
+        self._tasks: set[asyncio.Task] = set()
 
     def depth(self) -> int:
         return self._waiting
@@ -30,5 +31,7 @@ class ControlQueue:
                 except Exception as e:
                     fut.set_exception(e)
 
-        asyncio.create_task(_run())
+        task = asyncio.create_task(_run())
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
         return fut
