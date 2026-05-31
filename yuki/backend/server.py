@@ -19,6 +19,9 @@ log = logging.getLogger("yuki")
 
 
 def require_token(authorization: Annotated[str, Header()] = "") -> None:
+    from yuki.backend import auth
+    if auth.is_uds_mode():
+        return
     if not authorization.lower().startswith("bearer "):
         raise HTTPException(status_code=401, detail="missing bearer token")
     token = authorization.split(" ", 1)[1].strip()

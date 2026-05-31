@@ -30,6 +30,10 @@ def set_uds_mode(enabled: bool) -> None:
     _uds_mode = enabled
 
 
+def is_uds_mode() -> bool:
+    return _uds_mode
+
+
 def verify(presented: str) -> None:
     if _uds_mode:
         return
