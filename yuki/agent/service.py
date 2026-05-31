@@ -34,11 +34,11 @@ _NON_TOOL_PARAMS = {"thought", "evaluate", "plan"}
 # yuki.agent.tools.service. Tools not listed default to 0.0s (no extra wait).
 _POST_ACTION_SETTLE: dict[str, float] = {
     # Strong settle: window-level changes
-    "app_tool": 0.5,           # launch/switch/resize → window animations
+    "app_tool": 1.0,           # launch/switch/resize → window animations + AX warm-up
     # Medium settle: focus + tab/window structural changes
-    "shortcut_tool": 0.3,      # cmd+t / cmd+w / cmd+r / cmd+n etc.
-    "click_tool": 0.2,         # may navigate or open modal
-    "type_tool": 0.2,          # press_enter triggers nav; safe minimum
+    "shortcut_tool": 1.0,      # cmd+t / cmd+w / cmd+r — Chrome omnibox needs ~700ms
+    "click_tool": 0.3,         # may navigate or open modal
+    "type_tool": 0.5,          # press_enter triggers nav; allow page to start loading
     "scroll_tool": 0.2,        # content reflows
     "move_tool": 0.0,          # pure mouse move; no UI mutation
     "drag_tool": 0.3,          # drop may reorder UI
@@ -173,14 +173,45 @@ class Agent(BaseAgent):
                 desktop=self.desktop,
                 nudge=nudge or "",
             )
-            active_app = (
-                self.desktop.desktop_state.active_window.name
-                if self.desktop.desktop_state and self.desktop.desktop_state.active_window
-                else "Unknown"
+            _aw = (
+                self.desktop.desktop_state.active_window
+                if self.desktop.desktop_state else None
             )
-            # self.event.emit(
-            #     AgentEvent(type=EventType.STATE, data={"step": step, "max_steps": self.state.max_steps, "active_app": active_app})
-            # )
+            active_app = (
+                (_aw.name.strip() or f"<{_aw.bundle_id}>") if _aw else "Unknown"
+            )
+
+            tree = getattr(self.desktop.desktop_state, "tree_state", None)
+            focused_input = None
+            url_bars: list[str] = []
+            search_fields: list[str] = []
+            if tree and getattr(tree, "interactive_nodes", None):
+                for n in tree.interactive_nodes:
+                    if n.canonical == "url_bar":
+                        url_bars.append(f"{n.center.to_string()} {n.window_name}")
+                    elif n.canonical == "search_field":
+                        search_fields.append(f"{n.center.to_string()} {n.window_name}")
+                    if n.is_focused and n.canonical in {
+                        "primary_input", "url_bar", "search_field", "text_input"
+                    }:
+                        focused_input = (
+                            f"{n.canonical} @ {n.center.to_string()} "
+                            f"(role={n.control_type}, name={n.name!r})"
+                        )
+
+            self.event.emit(
+                AgentEvent(
+                    type=EventType.STATE,
+                    data={
+                        "step": step,
+                        "max_steps": self.state.max_steps,
+                        "active_app": active_app,
+                        "focused_input": focused_input,
+                        "url_bars": url_bars[:3],
+                        "search_fields": search_fields[:3],
+                    },
+                )
+            )
             if nudge:
                 self.event.emit(
                     AgentEvent(type=EventType.ERROR, data={"step": step, "error": f"Loop detected: {nudge}"})
@@ -298,6 +329,7 @@ class Agent(BaseAgent):
                             "tool_name": tool_name,
                             "is_success": tool_result.is_success,
                             "content": content,
+                            "settle_s": settle if settle > 0.0 else None,
                         },
                     )
                 )
@@ -366,14 +398,45 @@ class Agent(BaseAgent):
                 desktop=self.desktop,
                 nudge=nudge or "",
             )
-            active_app = (
-                self.desktop.desktop_state.active_window.name
-                if self.desktop.desktop_state and self.desktop.desktop_state.active_window
-                else "Unknown"
+            _aw = (
+                self.desktop.desktop_state.active_window
+                if self.desktop.desktop_state else None
             )
-            # self.event.emit(
-            #     AgentEvent(type=EventType.STATE, data={"step": step, "max_steps": self.state.max_steps, "active_app": active_app})
-            # )
+            active_app = (
+                (_aw.name.strip() or f"<{_aw.bundle_id}>") if _aw else "Unknown"
+            )
+
+            tree = getattr(self.desktop.desktop_state, "tree_state", None)
+            focused_input = None
+            url_bars: list[str] = []
+            search_fields: list[str] = []
+            if tree and getattr(tree, "interactive_nodes", None):
+                for n in tree.interactive_nodes:
+                    if n.canonical == "url_bar":
+                        url_bars.append(f"{n.center.to_string()} {n.window_name}")
+                    elif n.canonical == "search_field":
+                        search_fields.append(f"{n.center.to_string()} {n.window_name}")
+                    if n.is_focused and n.canonical in {
+                        "primary_input", "url_bar", "search_field", "text_input"
+                    }:
+                        focused_input = (
+                            f"{n.canonical} @ {n.center.to_string()} "
+                            f"(role={n.control_type}, name={n.name!r})"
+                        )
+
+            self.event.emit(
+                AgentEvent(
+                    type=EventType.STATE,
+                    data={
+                        "step": step,
+                        "max_steps": self.state.max_steps,
+                        "active_app": active_app,
+                        "focused_input": focused_input,
+                        "url_bars": url_bars[:3],
+                        "search_fields": search_fields[:3],
+                    },
+                )
+            )
             if nudge:
                 self.event.emit(
                     AgentEvent(type=EventType.ERROR, data={"step": step, "error": f"Loop detected: {nudge}"})
@@ -488,6 +551,7 @@ class Agent(BaseAgent):
                             "tool_name": tool_name,
                             "is_success": tool_result.is_success,
                             "content": content,
+                            "settle_s": settle if settle > 0.0 else None,
                         },
                     )
                 )

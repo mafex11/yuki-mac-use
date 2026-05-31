@@ -67,4 +67,7 @@ class DesktopState:
         if self.active_window is None:
             return "No focused window."
         w = self.active_window
-        return f"{w.name} ({w.bundle_id}) - {w.status.value}"
+        title = w.name.strip() if w.name else ""
+        if not title:
+            title = f"<{w.bundle_id}>"
+        return f"{title} ({w.bundle_id}) - {w.status.value}"

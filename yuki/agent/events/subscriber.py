@@ -45,6 +45,24 @@ class ConsoleEventSubscriber(BaseEventSubscriber):
                 max_steps = event.data.get("max_steps", "?")
                 app = event.data.get("active_app", "Unknown")
                 logger.info(f"[Step {step + 1}/{max_steps}] 🖥️  Active App: {app}")
+                focused = event.data.get("focused_input")
+                if focused:
+                    logger.info(f"[Step {step + 1}] 🎯 Focused input: {focused}")
+                url_bars = event.data.get("url_bars") or []
+                if url_bars:
+                    logger.info(f"[Step {step + 1}] 🔗 url_bar candidates: {url_bars}")
+                search_fields = event.data.get("search_fields") or []
+                if search_fields:
+                    logger.info(f"[Step {step + 1}] 🔎 search_field candidates: {search_fields}")
+            case EventType.EVALUATE:
+                step = event.data.get("step", 0)
+                e = event.data.get("evaluate", "")
+                icon = {"success": "✅", "fail": "❌", "neutral": "·"}.get(e, "·")
+                logger.info(f"[Step {step + 1}] {icon} Evaluate: {e}")
+            case EventType.PLAN:
+                step = event.data.get("step", 0)
+                p = event.data.get("plan", "")
+                logger.info(f"[Step {step + 1}] 📋 Plan:\n{p}")
             case EventType.THOUGHT:
                 t = event.data.get("thought", "")
                 logger.info(f"[Agent] 🧠 Thinking: {t}")
@@ -57,10 +75,12 @@ class ConsoleEventSubscriber(BaseEventSubscriber):
                 n = _format_tool_name(event.data.get("tool_name", ""))
                 s = event.data.get("is_success", True)
                 c = event.data.get("content", "")
+                settle = event.data.get("settle_s")
+                suffix = f" (settle={settle}s)" if settle else ""
                 if not s:
-                    logger.warning(f"[Agent] 🚨 Tool '{n}' failed: {c}")
+                    logger.warning(f"[Agent] 🚨 Tool '{n}' failed: {c}{suffix}")
                 else:
-                    logger.info(f"[Agent] 📃 Tool Result: {c}")
+                    logger.info(f"[Agent] 📃 Tool Result: {c}{suffix}")
             case EventType.DONE:
                 c = event.data.get("content", "")
                 logger.info(f"[Agent] 📜 Final Answer: {c}")

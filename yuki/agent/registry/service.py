@@ -28,8 +28,15 @@ class Registry:
             return ToolResult(is_success=False, error=f"Tool '{tool_name}' not found.")
         errors = tool.validate_params(tool_params)
         if errors:
-            error_msg = "\n".join(errors)
-            return ToolResult(is_success=False, error=f"Tool '{tool_name}' validation failed:\n{error_msg}")
+            # Some providers (Gemini) intermittently drop the `thought` preamble
+            # field. Forgive that single case by synthesizing a stub thought
+            # and re-validating. Anything else still fails.
+            if all("thought" in e for e in errors) and "thought" not in tool_params:
+                tool_params = {**tool_params, "thought": "(thought omitted by provider)"}
+                errors = tool.validate_params(tool_params)
+            if errors:
+                error_msg = "\n".join(errors)
+                return ToolResult(is_success=False, error=f"Tool '{tool_name}' validation failed:\n{error_msg}")
         try:
             content = tool.invoke(**({'desktop': desktop} | tool_params))
             return ToolResult(is_success=True, content=content)
@@ -43,8 +50,15 @@ class Registry:
             return ToolResult(is_success=False, error=f"Tool '{tool_name}' not found.")
         errors = tool.validate_params(tool_params)
         if errors:
-            error_msg = "\n".join(errors)
-            return ToolResult(is_success=False, error=f"Tool '{tool_name}' validation failed:\n{error_msg}")
+            # Some providers (Gemini) intermittently drop the `thought` preamble
+            # field. Forgive that single case by synthesizing a stub thought
+            # and re-validating. Anything else still fails.
+            if all("thought" in e for e in errors) and "thought" not in tool_params:
+                tool_params = {**tool_params, "thought": "(thought omitted by provider)"}
+                errors = tool.validate_params(tool_params)
+            if errors:
+                error_msg = "\n".join(errors)
+                return ToolResult(is_success=False, error=f"Tool '{tool_name}' validation failed:\n{error_msg}")
         try:
             content = await tool.ainvoke(**({'desktop': desktop} | tool_params))
             return ToolResult(is_success=True, content=content)

@@ -127,8 +127,26 @@ class Desktop:
         if mode == 'switch':
             if not name:
                 return "App name or bundle ID required for switch."
-            app = ax.GetRunningApplicationByName(name) or ax.GetRunningApplicationByBundleId(name)
+            app = (
+                ax.GetRunningApplicationByName(name)
+                or ax.GetRunningApplicationByBundleId(name)
+            )
             if not app:
+                # Brief retry: a freshly-launched app may not be registered yet.
+                for _ in range(5):
+                    time.sleep(0.3)
+                    app = (
+                        ax.GetRunningApplicationByName(name)
+                        or ax.GetRunningApplicationByBundleId(name)
+                    )
+                    if app:
+                        break
+            if not app:
+                # Last-resort fallback: `open -a` both launches and activates.
+                ok = ax.LaunchApplication(name)
+                if ok:
+                    time.sleep(0.5)
+                    return f"Activated {name} via open -a."
                 return f"Application '{name}' not found."
             ax.ActivateApplication(app.PID)
             time.sleep(0.2)
@@ -233,6 +251,12 @@ class Desktop:
             time.sleep(0.02)
         ax.TypeText(text)
         if press_enter:
+            # Catalyst apps (WhatsApp, Messages) and some slow Electron renderers
+            # process keystrokes asynchronously. Firing Enter immediately can land
+            # before the typed text is committed, sending an empty / partial
+            # message. 0.5s is empirically enough for WhatsApp without making
+            # native AppKit apps feel laggy.
+            time.sleep(0.5)
             ax.KeyPress(ax.KeyCode.Return)
 
     def scroll(
