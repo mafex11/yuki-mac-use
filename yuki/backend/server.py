@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,6 +14,8 @@ from fastapi.staticfiles import StaticFiles
 
 from yuki.backend.auth import AuthError, verify
 from yuki.backend.runtime import get_runtime, reset_runtime
+
+log = logging.getLogger("yuki")
 
 
 def require_token(authorization: Annotated[str, Header()] = "") -> None:
@@ -24,11 +28,41 @@ def require_token(authorization: Annotated[str, Header()] = "") -> None:
         raise HTTPException(status_code=401, detail=str(e)) from e
 
 
+def _build_observer():
+    """Build the observer Daemon if YUKI_OBSERVER=1 (default off)."""
+    if os.environ.get("YUKI_OBSERVER", "0") != "1":
+        return None
+    try:
+        from yuki.observer.daemon import Daemon
+        from yuki.observer.sources.idle import IdleSource
+        from yuki.observer.sources.window import WindowSource
+    except Exception as e:
+        log.warning("observer disabled: import failed: %s", e)
+        return None
+    return Daemon(sources=[WindowSource(), IdleSource()])
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     get_runtime()
-    yield
-    reset_runtime()
+    daemon = _build_observer()
+    if daemon is not None:
+        try:
+            await daemon.start()
+            log.info("yuki: observer started (window + idle sources)")
+        except Exception as e:
+            log.warning("yuki: observer failed to start: %s", e)
+            daemon = None
+    try:
+        yield
+    finally:
+        if daemon is not None:
+            try:
+                await daemon.stop()
+                log.info("yuki: observer stopped, events flushed")
+            except Exception as e:
+                log.warning("yuki: observer stop failed: %s", e)
+        reset_runtime()
 
 
 def create_app() -> FastAPI:
