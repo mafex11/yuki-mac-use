@@ -14,15 +14,16 @@ from yuki.agent.events.views import AgentEvent
 
 
 class QueueEventSubscriber(BaseEventSubscriber):
-    def __init__(self, queue: asyncio.Queue) -> None:
+    def __init__(self, queue: asyncio.Queue,
+                 loop: asyncio.AbstractEventLoop | None = None) -> None:
         self._queue = queue
-        self._loop = asyncio.get_event_loop()
+        self._loop = loop
 
     def invoke(self, event: AgentEvent) -> None:
+        if self._loop is None:
+            self._loop = asyncio.get_running_loop()
         self._loop.call_soon_threadsafe(self._queue.put_nowait, event)
 
 
 def event_to_sse(ev: AgentEvent) -> dict[str, Any]:
-    d: dict[str, Any] = {"type": ev.type.value}
-    d.update(ev.data)
-    return d
+    return {**ev.data, "type": ev.type.value}
