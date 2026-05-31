@@ -42,6 +42,21 @@ def index_db_path() -> Path:
     return _home() / "Library" / "Application Support" / "Yuki" / "index.db"
 
 
+def app_support_dir() -> Path:
+    override = os.environ.get("YUKI_APP_SUPPORT")
+    if override:
+        return Path(override)
+    return _home() / "Library" / "Application Support" / "Yuki"
+
+
+def socket_path() -> Path:
+    return app_support_dir() / "yuki.sock"
+
+
+def chat_history_path() -> Path:
+    return app_support_dir() / "chat_history.jsonl"
+
+
 def section_path(section: str) -> Path:
     if section not in SECTIONS:
         raise ValueError(f"Unknown section: {section!r}")

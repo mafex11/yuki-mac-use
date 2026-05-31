@@ -82,13 +82,8 @@ def history_path() -> Path:
     override = os.environ.get("YUKI_CHAT_HISTORY")
     if override:
         return Path(override)
-    return (
-        Path.home()
-        / "Library"
-        / "Application Support"
-        / "Yuki"
-        / "chat_history.jsonl"
-    )
+    from yuki.memory import paths
+    return paths.chat_history_path()
 
 
 _ROLE_TO_CLS = {
