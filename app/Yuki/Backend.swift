@@ -153,4 +153,76 @@ final class Backend {
         else { return false }
         return (o["ok"] as? Bool) ?? false
     }
+
+    // MARK: - memory facts
+
+    struct Fact: Identifiable {
+        let id: String
+        let section: String
+        let title: String
+        let text: String
+    }
+
+    func facts() async -> [Fact] {
+        guard let data = try? await client.getJSON(path: "/facts"),
+              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = o["facts"] as? [[String: Any]] else { return [] }
+        return arr.compactMap { d in
+            guard let id = d["id"] as? String else { return nil }
+            return Fact(id: id,
+                        section: d["section"] as? String ?? "",
+                        title: d["title"] as? String ?? "",
+                        text: d["text"] as? String ?? "")
+        }
+    }
+
+    @discardableResult
+    func addFact(_ text: String) async -> Bool {
+        guard let body = try? JSONSerialization.data(withJSONObject: ["text": text])
+        else { return false }
+        return (try? await client.postJSON(path: "/facts", body: body)) != nil
+    }
+
+    @discardableResult
+    func forgetFact(id: String) async -> Bool {
+        return (try? await client.deleteJSON(path: "/facts/\(id)")) != nil
+    }
+
+    func memorySettings() async -> (learner: Bool, ask: Bool) {
+        guard let data = try? await client.getJSON(path: "/facts/settings"),
+              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return (true, true) }
+        return (o["learner_enabled"] as? Bool ?? true,
+                o["ask_before_remember"] as? Bool ?? true)
+    }
+
+    func setMemorySettings(learner: Bool? = nil, ask: Bool? = nil) async {
+        var payload: [String: Any] = [:]
+        if let learner = learner { payload["learner_enabled"] = learner }
+        if let ask = ask { payload["ask_before_remember"] = ask }
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        _ = try? await client.postJSON(path: "/facts/settings", body: body)
+    }
+
+    // MARK: - control streamed into the command bar
+
+    /// Run a control task, forwarding every SSE event to `onEvent` (for the
+    /// bar's inline activity) while the HUD also reflects status. Resolves
+    /// when the task completes.
+    func runControlInBar(_ msg: String,
+                         onEvent: @escaping ([String: Any]) -> Void) async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            guard let body = try? JSONSerialization.data(
+                    withJSONObject: ["message": msg]) else { cont.resume(); return }
+            client.streamSSE(path: "/chat/control", body: body, onEvent: { line in
+                guard let d = line.data(using: .utf8),
+                      let o = try? JSONSerialization.jsonObject(with: d)
+                        as? [String: Any] else { return }
+                Task { @MainActor in
+                    HUD.shared.handle(event: o)
+                    onEvent(o)
+                }
+            }, onDone: { cont.resume() })
+        }
+    }
 }
