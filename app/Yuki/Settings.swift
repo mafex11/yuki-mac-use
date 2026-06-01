@@ -30,6 +30,7 @@ struct SettingsView: View {
             GeneralSettings().tabItem { Label("General", systemImage: "gear") }
             ProviderSettings().tabItem { Label("Provider", systemImage: "brain") }
             PermissionsSettings().tabItem { Label("Permissions", systemImage: "lock") }
+            MemorySettings().tabItem { Label("Memory", systemImage: "brain.head.profile") }
             AboutSettings().tabItem { Label("About", systemImage: "info.circle") }
         }
         .frame(width: 480, height: 420)
@@ -156,4 +157,86 @@ struct AboutSettings: View {
         }
         .padding()
     }
+}
+
+struct MemorySettings: View {
+    @State private var facts: [Backend.Fact] = []
+    @State private var newFact = ""
+    @State private var learner = true
+    @State private var ask = true
+    @State private var loaded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("What Yuki knows about you").font(.headline)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(facts) { fact in
+                        HStack(alignment: .top) {
+                            Text(fact.section.uppercased())
+                                .font(.caption2).foregroundStyle(.secondary)
+                                .frame(width: 64, alignment: .leading)
+                            Text(fact.text).font(.callout)
+                            Spacer()
+                            Button(role: .destructive) {
+                                Task {
+                                    await Backend.shared.forgetFact(id: fact.id)
+                                    await reload()
+                                }
+                            } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                    if facts.isEmpty {
+                        Text("Nothing yet. Add a fact below, or just tell Yuki about yourself in chat.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(maxHeight: 160)
+
+            HStack {
+                TextField("Add a fact (e.g. I use Linear for tickets)", text: $newFact)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { addFact() }
+                Button("Add") { addFact() }
+                    .disabled(newFact.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+
+            Divider()
+            Toggle("Daily learning (distill tasks into reusable notes)", isOn: $learner)
+                .onChange(of: learner) { on in
+                    Task { await Backend.shared.setMemorySettings(learner: on) }
+                    LaunchAgentManager.reconcile(enabled: on)
+                }
+            Toggle("Ask before remembering things from chat", isOn: $ask)
+                .onChange(of: ask) { on in
+                    Task { await Backend.shared.setMemorySettings(ask: on) }
+                }
+        }
+        .padding()
+        .onAppear {
+            guard !loaded else { return }
+            loaded = true
+            Task {
+                let s = await Backend.shared.memorySettings()
+                learner = s.learner
+                ask = s.ask
+                await reload()
+            }
+        }
+    }
+
+    private func addFact() {
+        let text = newFact.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        newFact = ""
+        Task {
+            await Backend.shared.addFact(text)
+            await reload()
+        }
+    }
+
+    private func reload() async { facts = await Backend.shared.facts() }
 }
