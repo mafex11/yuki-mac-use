@@ -100,6 +100,8 @@ struct CommandBarView: View {
     @State private var ctxBadge = ""
     @State private var busy = false
     @FocusState private var inputFocused: Bool
+    @State private var pendingCapture: String? = nil
+    @State private var askBeforeRemember = true
 
     struct Turn: Identifiable {
         let id = UUID()
@@ -142,6 +144,19 @@ struct CommandBarView: View {
                 .onChange(of: liveActivity) { _ in scrollToEnd(proxy) }
             }
 
+            if let capture = pendingCapture {
+                HStack(spacing: 8) {
+                    Text("Remember: \(capture)").font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    Spacer()
+                    Button("Yes") {
+                        Task { await Backend.shared.addFact(capture); pendingCapture = nil }
+                    }.controlSize(.small)
+                    Button("No") { pendingCapture = nil }.controlSize(.small)
+                }
+                .padding(.horizontal, 16).padding(.bottom, 8)
+            }
+
             Divider()
 
             // Input pinned at the bottom.
@@ -161,7 +176,11 @@ struct CommandBarView: View {
         }
         .frame(width: 720, height: 420)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .onAppear { loadStatus(); inputFocused = true }
+        .onAppear {
+            loadStatus()
+            inputFocused = true
+            Task { askBeforeRemember = await Backend.shared.memorySettings().ask }
+        }
         .onReceive(NotificationCenter.default.publisher(
             for: CommandBar.focusRequest)) { _ in inputFocused = true }
     }
@@ -187,6 +206,28 @@ struct CommandBarView: View {
         input = ""
         if msg == "/clear" { runClear(); return }
         if msg == "/compact" { runCompact(); return }
+        if msg == "/memory" { runMemoryList(); return }
+        if msg.hasPrefix("/remember ") {
+            let fact = String(msg.dropFirst("/remember ".count))
+            history.append(Turn(role: "human", text: msg))
+            Task {
+                await Backend.shared.addFact(fact)
+                history.append(Turn(role: "ai", text: "Got it — I'll remember that."))
+                inputFocused = true
+            }
+            return
+        }
+        if msg == "/forget" { runMemoryList(forForget: true); return }
+        if msg.hasPrefix("/forget ") {
+            let id = String(msg.dropFirst("/forget ".count))
+                .trimmingCharacters(in: .whitespaces)
+            Task {
+                _ = await Backend.shared.forgetFact(id: id)
+                history.append(Turn(role: "ai", text: "Forgotten."))
+                inputFocused = true
+            }
+            return
+        }
         history.append(Turn(role: "human", text: msg))
         Task { await route(msg) }
     }
@@ -216,10 +257,13 @@ struct CommandBarView: View {
             CommandBar.shared.isRunningControl = false
         } else {
             liveActivity = "Thinking…"
-            let (reply, badge) = await Backend.shared.chat(msg)
+            let (reply, badge, capture) = await Backend.shared.chat(msg)
             history.append(Turn(role: "ai", text: reply))
             ctxBadge = badge
             liveActivity = nil
+            if askBeforeRemember, let capture = capture, !capture.isEmpty {
+                pendingCapture = capture
+            }
         }
         busy = false
         inputFocused = true   // persistent focus after every response
@@ -240,5 +284,22 @@ struct CommandBarView: View {
 
     private func runCompact() {
         Task { ctxBadge = await Backend.shared.compact(); inputFocused = true }
+    }
+
+    private func runMemoryList(forForget: Bool = false) {
+        Task {
+            let facts = await Backend.shared.facts()
+            if facts.isEmpty {
+                history.append(Turn(role: "ai",
+                    text: "I don't know anything about you yet. Tell me, or use /remember <fact>."))
+            } else {
+                let lines = facts.map { f in
+                    forForget ? "• [\(f.id)] \(f.text)" : "• \(f.text) (\(f.section))"
+                }.joined(separator: "\n")
+                let hint = forForget ? "\n\nRemove one with: /forget <id>" : ""
+                history.append(Turn(role: "ai", text: "What I know:\n\(lines)\(hint)"))
+            }
+            inputFocused = true
+        }
     }
 }

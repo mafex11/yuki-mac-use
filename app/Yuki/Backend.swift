@@ -21,9 +21,10 @@ final class Backend {
 
     // MARK: - chat (collects the single final 'done')
 
-    func chat(_ msg: String) async -> (reply: String, badge: String) {
+    func chat(_ msg: String) async -> (reply: String, badge: String, capture: String?) {
         var reply = ""
         var badge = ""
+        var capture: String? = nil
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             guard let body = try? JSONSerialization.data(
                     withJSONObject: ["message": msg]) else {
@@ -37,12 +38,13 @@ final class Backend {
                 if type == "done" {
                     reply = o["content"] as? String ?? ""
                     badge = o["ctx_badge"] as? String ?? ""
+                    capture = o["capture_suggestion"] as? String
                 } else if type == "error" {
                     reply = "[error] " + (o["content"] as? String ?? "")
                 }
             }, onDone: { cont.resume() })
         }
-        return (reply, badge)
+        return (reply, badge, capture)
     }
 
     // MARK: - control (forwards every event to the HUD)
