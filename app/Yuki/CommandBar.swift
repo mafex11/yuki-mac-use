@@ -204,6 +204,7 @@ struct CommandBarView: View {
         let msg = input.trimmingCharacters(in: .whitespaces)
         guard !msg.isEmpty, !busy else { return }
         input = ""
+        pendingCapture = nil   // a new message dismisses an unanswered "remember?" prompt
         if msg == "/clear" { runClear(); return }
         if msg == "/compact" { runCompact(); return }
         if msg == "/memory" { runMemoryList(); return }
@@ -221,9 +222,15 @@ struct CommandBarView: View {
         if msg.hasPrefix("/forget ") {
             let id = String(msg.dropFirst("/forget ".count))
                 .trimmingCharacters(in: .whitespaces)
+            if id.isEmpty {
+                history.append(Turn(role: "ai", text: "Usage: /forget <id>"))
+                inputFocused = true
+                return
+            }
             Task {
-                _ = await Backend.shared.forgetFact(id: id)
-                history.append(Turn(role: "ai", text: "Forgotten."))
+                let ok = await Backend.shared.forgetFact(id: id)
+                history.append(Turn(role: "ai",
+                    text: ok ? "Forgotten." : "No fact with that id."))
                 inputFocused = true
             }
             return
