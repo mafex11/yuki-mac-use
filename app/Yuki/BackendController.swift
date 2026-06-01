@@ -1,38 +1,59 @@
 import Foundation
 
-enum BackendError: Error {
-    case missingPython
-    case startupTimeout
-    case nonZeroExit(Int32, String)
-}
+enum BackendError: Error { case startupTimeout }
 
 actor BackendController {
     private var process: Process?
-    private var port: Int = 0
 
-    func startAndWaitForHealth(token: String) async throws -> Int {
-        let bundle = Bundle.main.bundleURL
-        let pythonURL = bundle
-            .appendingPathComponent("Contents/Frameworks/Python.framework/Versions/Current/bin/python3")
-        guard FileManager.default.fileExists(atPath: pythonURL.path) else {
-            throw BackendError.missingPython
-        }
+    private var socketPath: String {
+        NSHomeDirectory() + "/Library/Application Support/Yuki/yuki.sock"
+    }
 
-        let chosenPort = try Self.pickPort()
-        self.port = chosenPort
+    /// Spawn the Python backend over UDS. Prefers a bundled interpreter inside
+    /// the .app; falls back to `uv run` from the repo for dev builds.
+    func start() async throws {
+        // Clean any stale socket from a prior crashed run.
+        try? FileManager.default.removeItem(atPath: socketPath)
+        try? FileManager.default.createDirectory(
+            atPath: (socketPath as NSString).deletingLastPathComponent,
+            withIntermediateDirectories: true)
 
         let p = Process()
-        p.executableURL = pythonURL
-        p.arguments = ["-m", "yuki.backend.cli"]
-        var env = ProcessInfo.processInfo.environment
-        env["YUKI_AUTH_TOKEN"] = token
-        env["YUKI_PORT"] = String(chosenPort)
-        p.environment = env
+        let res = Bundle.main.resourceURL
+        let bundledPython = res?
+            .appendingPathComponent("python/bin/python3").path
+
+        if let bundledPython = bundledPython,
+           FileManager.default.fileExists(atPath: bundledPython) {
+            // Bundled (production) mode.
+            p.executableURL = URL(fileURLWithPath: bundledPython)
+            p.arguments = ["-m", "yuki.backend.cli", "--uds"]
+            var env = ProcessInfo.processInfo.environment
+            env["PYTHONPATH"] = res!
+                .appendingPathComponent("python/lib/python3.12/site-packages").path
+            env["TIKTOKEN_CACHE_DIR"] = res!
+                .appendingPathComponent("tiktoken").path
+            p.environment = env
+        } else {
+            // Dev fallback: run from the repo via uv.
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            p.arguments = ["uv", "run", "python", "-m", "yuki.backend.cli", "--uds"]
+            p.currentDirectoryURL = URL(
+                fileURLWithPath: Self.devRepoRoot())
+        }
+
+        // Pipe Python stdio to a log file.
+        let logPath = (socketPath as NSString).deletingLastPathComponent
+            + "/python.log"
+        FileManager.default.createFile(atPath: logPath, contents: nil)
+        if let handle = FileHandle(forWritingAtPath: logPath) {
+            p.standardOutput = handle
+            p.standardError = handle
+        }
+
         try p.run()
         self.process = p
-
-        try await Self.waitForHealthz(port: chosenPort, timeoutSeconds: 15)
-        return chosenPort
+        try await waitForSocket()
     }
 
     func stop() {
@@ -40,39 +61,26 @@ actor BackendController {
         process = nil
     }
 
-    private static func pickPort() throws -> Int {
-        let s = socket(AF_INET, SOCK_STREAM, 0)
-        defer { close(s) }
-        var addr = sockaddr_in()
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_addr.s_addr = inet_addr("127.0.0.1")
-        addr.sin_port = 0
-        var bound = addr
-        _ = withUnsafePointer(to: &bound) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(s, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
-        }
-        var len = socklen_t(MemoryLayout<sockaddr_in>.size)
-        var resolved = sockaddr_in()
-        _ = withUnsafeMutablePointer(to: &resolved) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                getsockname(s, $0, &len)
-            }
-        }
-        return Int(UInt16(bigEndian: resolved.sin_port))
-    }
-
-    private static func waitForHealthz(port: Int, timeoutSeconds: Double) async throws {
-        let deadline = Date().addingTimeInterval(timeoutSeconds)
-        let url = URL(string: "http://127.0.0.1:\(port)/healthz")!
+    private func waitForSocket() async throws {
+        let client = UDSClient(socketPath: socketPath)
+        let deadline = Date().addingTimeInterval(25)
         while Date() < deadline {
-            if let (_, resp) = try? await URLSession.shared.data(from: url),
-               (resp as? HTTPURLResponse)?.statusCode == 200 {
-                return
+            if FileManager.default.fileExists(atPath: socketPath) {
+                if let _ = try? await client.getJSON(path: "/healthz") {
+                    return
+                }
             }
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            try? await Task.sleep(nanoseconds: 300_000_000)
         }
         throw BackendError.startupTimeout
+    }
+
+    /// Best-effort repo root for dev mode: walk up from this source file is
+    /// not possible at runtime, so use an env override or a hardcoded default.
+    private static func devRepoRoot() -> String {
+        if let override = ProcessInfo.processInfo.environment["YUKI_REPO_ROOT"] {
+            return override
+        }
+        return NSHomeDirectory() + "/code/personal/Yuki"
     }
 }

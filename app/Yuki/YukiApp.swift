@@ -16,18 +16,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotkey = HotKey()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        menu.attach()
+        hotkey.register(
+            onTap: { CommandBar.shared.toggle() },
+            onLongPress: nil
+        )
         Task {
             do {
-                let token = try Token.generate()
-                let port = try await backend.startAndWaitForHealth(token: token)
-                menu.attach()
-                hotkey.register(
-                    onTap: { CommandBar.shared.toggle() },
-                    onLongPress: { BurstBridge.engage(token: token, port: port) }
-                )
+                try await backend.start()
+                FirstRun.runIfNeeded()
             } catch {
-                NSLog("Yuki failed to start: \(error)")
-                NSApp.terminate(nil)
+                NSLog("Yuki backend failed to start: \(error)")
+                let alert = NSAlert()
+                alert.messageText = "Yuki couldn't start its engine"
+                alert.informativeText =
+                    "The backend failed to launch. Check ~/Library/Application Support/Yuki/python.log.\n\n\(error)"
+                alert.runModal()
             }
         }
     }
