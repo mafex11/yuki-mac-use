@@ -132,6 +132,19 @@ final class Backend {
         _ = try? await client.postJSON(path: "/settings/provider", body: body)
     }
 
+    /// Push a provider's api key to the backend in-process. The app is the only
+    /// binary the Keychain ACL trusts, so it reads the key silently (no GUI
+    /// prompt) and hands it over; the headless backend never shells out to
+    /// `security`, which would block on an unanswerable access prompt.
+    func pushKey(for provider: String) async {
+        guard provider == "google" || provider == "anthropic",
+              let key = Keychain.get(account: provider), !key.isEmpty,
+              let body = try? JSONSerialization.data(
+                withJSONObject: ["provider": provider, "key": key])
+        else { return }
+        _ = try? await client.postJSON(path: "/settings/provider/key", body: body)
+    }
+
     func testConnection() async -> Bool {
         guard let data = try? await client.getJSON(
                 path: "/settings/provider/test"),

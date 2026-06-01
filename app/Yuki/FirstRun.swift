@@ -119,6 +119,7 @@ struct FirstRunView: View {
         saveKeyIfPresent()
         Task {
             await Backend.shared.saveProvider(provider)
+            await Backend.shared.pushKey(for: provider)
             let ok = await Backend.shared.testConnection()
             testResult = ok ? "✓ Connected" : "✗ Failed — check key"
             testing = false
@@ -129,6 +130,7 @@ struct FirstRunView: View {
         saveKeyIfPresent()
         Task {
             await Backend.shared.saveProvider(provider)
+            await Backend.shared.pushKey(for: provider)
             UserDefaults.standard.set(true, forKey: "yuki.providerConfigured")
             window.close()
         }

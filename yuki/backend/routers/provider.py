@@ -14,6 +14,11 @@ class ProviderConfig(BaseModel):
     model: str | None = None
 
 
+class ProviderKey(BaseModel):
+    provider: str
+    key: str
+
+
 @router.get("")
 async def get_provider() -> dict[str, str]:
     state = appstate.load()
@@ -30,6 +35,16 @@ async def set_provider(cfg: ProviderConfig) -> dict[str, str]:
     if cfg.model:
         state["llm_model"] = cfg.model
     appstate.save(state)
+    return {"ok": "true"}
+
+
+@router.post("/key")
+async def set_key(body: ProviderKey) -> dict[str, str]:
+    """Receive an api key from the trusted Swift app (read silently from the
+    Keychain there) and cache it in-process. Avoids the headless backend
+    shelling out to `security`, which blocks on a GUI ACL prompt.
+    """
+    appstate.set_runtime_key(body.provider, body.key)
     return {"ok": "true"}
 
 

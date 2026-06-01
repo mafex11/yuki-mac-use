@@ -31,6 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Task {
             do {
                 try await backend.start()
+                // Hand the backend its api key in-process: this app is the only
+                // binary the Keychain ACL trusts, so reading here is silent.
+                let provider = await Backend.shared.currentProvider()
+                await Backend.shared.pushKey(for: provider)
                 FirstRun.runIfNeeded()
             } catch {
                 NSLog("Yuki backend failed to start: \(error)")

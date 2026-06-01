@@ -104,14 +104,17 @@ struct ProviderSettings: View {
         if provider != "ollama" && !apiKey.isEmpty {
             Keychain.set(apiKey, account: provider)
         }
-        Task { await Backend.shared.saveProvider(provider) }
+        Task {
+            await Backend.shared.saveProvider(provider)
+            await Backend.shared.pushKey(for: provider)
+        }
     }
 
     private func test() {
         testing = true
         save()
         Task {
-            // Give saveProvider a beat to persist before testing.
+            // Give saveProvider + pushKey a beat to land before testing.
             try? await Task.sleep(nanoseconds: 200_000_000)
             let ok = await Backend.shared.testConnection()
             testResult = ok ? "✓ Connected" : "✗ Failed"

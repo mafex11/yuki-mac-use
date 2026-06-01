@@ -56,6 +56,23 @@ def save(cfg: dict[str, Any]) -> None:
     p.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
+# Keys pushed in-process by the trusted Swift app over UDS (see set_runtime_key).
+# Checked before the Keychain CLI so the headless backend never triggers a
+# cross-binary "allow access?" prompt that it can't answer.
+_RUNTIME_KEYS: dict[str, str] = {}
+
+
+def set_runtime_key(provider: str, key: str) -> None:
+    """Cache an api key handed to us in-process (by the Swift app via UDS).
+
+    The macOS Keychain ACL trusts only the app binary, so the `security` CLI
+    that this backend would otherwise shell out to blocks on a GUI prompt and
+    times out. The app reads the key silently and pushes it here instead.
+    """
+    if provider in _KEY_ENV and key:
+        _RUNTIME_KEYS[provider] = key
+
+
 def _keychain_get(account: str) -> str | None:  # pragma: no cover -- real Keychain
     if account not in _KEY_ENV:
         return None
@@ -63,7 +80,7 @@ def _keychain_get(account: str) -> str | None:  # pragma: no cover -- real Keych
         out = subprocess.run(
             ["security", "find-generic-password",
              "-s", _KEYCHAIN_SERVICE, "-a", account, "-w"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=2,
         )
         if out.returncode == 0:
             return out.stdout.strip() or None
@@ -78,4 +95,7 @@ def api_key_for(provider: str) -> str | None:
         val = os.environ.get(env_name)
         if val:
             return val
+    runtime = _RUNTIME_KEYS.get(provider)
+    if runtime:
+        return runtime
     return _keychain_get(provider)
