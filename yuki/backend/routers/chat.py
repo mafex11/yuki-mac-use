@@ -11,6 +11,7 @@ keeps the existing Agent.ainvoke shape (single done with full content).
 from __future__ import annotations
 
 import json
+import re as _re
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -28,8 +29,25 @@ _BASE_SYSTEM_PROMPT = (
     "You are Yuki, a helpful macOS-resident assistant. "
     "Reply directly and concisely. If the user asks a factual question, "
     "answer it. If they ask you to do something on their Mac, tell them to "
-    "use /chat/control instead — that surface has accessibility access."
+    "use /chat/control instead — that surface has accessibility access. "
+    "If the user states a durable personal fact about themselves, their "
+    "tools, people, or projects (e.g. 'I always use Linear for tickets'), "
+    "append it ONCE at the very end of your reply as "
+    "<remember>the fact, rephrased concisely</remember>. Only for genuine, "
+    "lasting facts — never for questions, chit-chat, or one-off requests."
 )
+
+_REMEMBER_RE = _re.compile(r"<remember>(.*?)</remember>", _re.IGNORECASE | _re.DOTALL)
+
+
+def _split_capture(text: str) -> tuple[str, str | None]:
+    """Return (visible_text, capture_suggestion|None), stripping the tag."""
+    m = _REMEMBER_RE.search(text)
+    if not m:
+        return text, None
+    suggestion = m.group(1).strip() or None
+    visible = _REMEMBER_RE.sub("", text).strip()
+    return visible, suggestion
 
 
 class ChatRequest(BaseModel):
@@ -111,6 +129,8 @@ async def _stream_chat(
         return
 
     text = getattr(result, "content", None) or ""
+    visible, capture = _split_capture(text)
+    text = visible
 
     # Persist this turn (user msg + AI reply) to global history.
     try:
@@ -126,6 +146,7 @@ async def _stream_chat(
         "content": text,
         "ctx_badge": tracker.badge(),
         "ctx_percent": int(tracker.percent_used),
+        "capture_suggestion": capture,
     }
     rec.record(final)
     yield final
