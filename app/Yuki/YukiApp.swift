@@ -16,6 +16,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotkey = HotKey()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Menu-bar app (no Dock icon) that can STILL activate + own a key
+        // window. Set in code because `swift run` (and bare executables) don't
+        // apply Info.plist's LSUIElement, which would otherwise leave the app
+        // at .prohibited — unable to become active, so keystrokes leak to the
+        // previously-frontmost app.
+        NSApp.setActivationPolicy(.accessory)
+
         menu.attach()
         hotkey.register(
             onTap: { CommandBar.shared.toggle() },

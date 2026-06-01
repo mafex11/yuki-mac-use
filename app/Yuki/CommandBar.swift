@@ -27,11 +27,16 @@ final class CommandBar {
         }
         if panel == nil { build() }
         position()
+        // Accessory apps need an explicit activate to own the key window;
+        // order the panel front and make it key so its text field gets keys.
         NSApp.activate(ignoringOtherApps: true)
         panel?.makeKeyAndOrderFront(nil)
+        panel?.makeFirstResponder(panel?.contentView)
         // Re-request text-field focus on every open (onAppear only fires once
         // because the panel/host view is reused across toggles).
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            NSApp.activate(ignoringOtherApps: true)
+            self.panel?.makeKey()
             NotificationCenter.default.post(name: Self.focusRequest, object: nil)
         }
     }
