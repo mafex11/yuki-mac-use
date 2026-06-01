@@ -17,11 +17,13 @@ final class KeyablePanel: NSPanel {
 final class CommandBar {
     static let shared = CommandBar()
     private var panel: NSPanel?
+    private var clickMonitor: Any?
 
     static let focusRequest = Notification.Name("yuki.commandbar.focus")
 
     func toggle() {
         if let p = panel, p.isVisible {
+            removeClickMonitor()
             p.orderOut(nil)
             return
         }
@@ -32,6 +34,7 @@ final class CommandBar {
         NSApp.activate(ignoringOtherApps: true)
         panel?.makeKeyAndOrderFront(nil)
         panel?.makeFirstResponder(panel?.contentView)
+        installClickMonitor()
         // Re-request text-field focus on every open (onAppear only fires once
         // because the panel/host view is reused across toggles).
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
@@ -41,7 +44,23 @@ final class CommandBar {
         }
     }
 
-    func close() { panel?.orderOut(nil) }
+    func close() {
+        removeClickMonitor()
+        panel?.orderOut(nil)
+    }
+
+    private func installClickMonitor() {
+        guard clickMonitor == nil else { return }
+        clickMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            // A click landed in ANOTHER app → dismiss.
+            self?.close()
+        }
+    }
+
+    private func removeClickMonitor() {
+        if let m = clickMonitor { NSEvent.removeMonitor(m); clickMonitor = nil }
+    }
 
     private func build() {
         let p = KeyablePanel(
@@ -70,46 +89,27 @@ final class CommandBar {
 struct CommandBarView: View {
     @State private var input = ""
     @State private var history: [Turn] = []
+    @State private var liveActivity: String? = nil   // transient "working on it" line
     @State private var ctxBadge = ""
     @State private var busy = false
     @FocusState private var inputFocused: Bool
 
     struct Turn: Identifiable {
         let id = UUID()
-        let role: String   // "human" | "ai"
+        let role: String   // "human" | "ai" | "error"
         let text: String
     }
 
+    private static let verbMap: [String: String] = [
+        "app_tool": "Switching app", "click_tool": "Clicking",
+        "type_tool": "Typing", "shortcut_tool": "Pressing keys",
+        "shell_tool": "Running", "scroll_tool": "Scrolling",
+        "scrape_tool": "Reading screen", "wait_tool": "Waiting",
+    ]
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header: title + ctx badge
-            HStack {
-                Text("yuki").font(.headline).foregroundStyle(.secondary)
-                Spacer()
-                Text(ctxBadge).font(.caption).foregroundStyle(.tertiary)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 8)
-
-            // Input at the top, command-bar style.
-            TextField("Ask Yuki…", text: $input)
-                .textFieldStyle(.plain)
-                .font(.title2)
-                .disabled(busy)
-                .focused($inputFocused)
-                .onSubmit { submit() }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 12)
-
-            if busy {
-                ProgressView().controlSize(.small)
-                    .padding(.horizontal, 16).padding(.bottom, 8)
-            }
-
-            Divider()
-
-            // Conversation scrolls below the input. Most-recent at bottom.
+            // Conversation on top, scrolls, newest at bottom.
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
@@ -117,30 +117,60 @@ struct CommandBarView: View {
                             Text(turn.role == "human" ? "❯ \(turn.text)" : turn.text)
                                 .font(.callout)
                                 .textSelection(.enabled)
-                                .foregroundStyle(turn.role == "human"
-                                                 ? .secondary : .primary)
+                                .foregroundStyle(color(for: turn.role))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .id(turn.id)
+                        }
+                        if let activity = liveActivity {
+                            HStack(spacing: 8) {
+                                ProgressView().controlSize(.small)
+                                Text(activity).font(.callout).foregroundStyle(.blue)
+                            }
+                            .id("live")
                         }
                     }
                     .padding(16)
                 }
-                .onChange(of: history.count) { _ in
-                    if let last = history.last {
-                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-                    }
-                }
+                .onChange(of: history.count) { _ in scrollToEnd(proxy) }
+                .onChange(of: liveActivity) { _ in scrollToEnd(proxy) }
             }
+
+            Divider()
+
+            // Input pinned at the bottom.
+            HStack(spacing: 8) {
+                Text("❯").foregroundStyle(.blue).font(.title3)
+                TextField("Ask Yuki…", text: $input)
+                    .textFieldStyle(.plain)
+                    .font(.title3)
+                    .disabled(busy)
+                    .focused($inputFocused)
+                    .onSubmit { submit() }
+                Text(ctxBadge).font(.caption2).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(.regularMaterial)
         }
         .frame(width: 720, height: 420)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .onAppear {
-            loadStatus()
-            inputFocused = true
-        }
+        .onAppear { loadStatus(); inputFocused = true }
         .onReceive(NotificationCenter.default.publisher(
-            for: CommandBar.focusRequest)) { _ in
-            inputFocused = true
+            for: CommandBar.focusRequest)) { _ in inputFocused = true }
+    }
+
+    private func color(for role: String) -> Color {
+        switch role {
+        case "human": return .secondary
+        case "error": return .red
+        default: return .primary
+        }
+    }
+
+    private func scrollToEnd(_ proxy: ScrollViewProxy) {
+        withAnimation {
+            if liveActivity != nil { proxy.scrollTo("live", anchor: .bottom) }
+            else if let last = history.last { proxy.scrollTo(last.id, anchor: .bottom) }
         }
     }
 
@@ -156,38 +186,50 @@ struct CommandBarView: View {
 
     private func route(_ msg: String) async {
         busy = true
-        defer { busy = false }
         let decision = await Backend.shared.route(msg)
         if decision == "control" {
-            CommandBar.shared.close()
-            Backend.shared.enqueueControl(msg)
+            liveActivity = "Working on it…"
+            await Backend.shared.runControlInBar(msg) { ev in
+                let type = ev["type"] as? String
+                if type == "tool_call" {
+                    let tool = ev["tool_name"] as? String ?? ""
+                    liveActivity = "Working on it — \(Self.verbMap[tool] ?? tool)…"
+                } else if type == "done" {
+                    let content = ev["content"] as? String ?? "Done."
+                    history.append(Turn(role: "ai", text: content))
+                    liveActivity = nil
+                } else if type == "error" {
+                    let content = ev["content"] as? String ?? "Failed."
+                    history.append(Turn(role: "error", text: content))
+                    liveActivity = nil
+                }
+            }
+            liveActivity = nil
         } else {
+            liveActivity = "Thinking…"
             let (reply, badge) = await Backend.shared.chat(msg)
             history.append(Turn(role: "ai", text: reply))
             ctxBadge = badge
+            liveActivity = nil
         }
+        busy = false
+        inputFocused = true   // persistent focus after every response
     }
 
     private func loadStatus() {
-        Task {
-            let st = await Backend.shared.status()
-            ctxBadge = st.badge
-        }
+        Task { ctxBadge = await Backend.shared.status().badge }
     }
 
     private func runClear() {
         Task {
             _ = await Backend.shared.clear()
             history = []
-            let st = await Backend.shared.status()
-            ctxBadge = st.badge
+            ctxBadge = await Backend.shared.status().badge
+            inputFocused = true
         }
     }
 
     private func runCompact() {
-        Task {
-            let badge = await Backend.shared.compact()
-            ctxBadge = badge
-        }
+        Task { ctxBadge = await Backend.shared.compact(); inputFocused = true }
     }
 }
