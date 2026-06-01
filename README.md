@@ -4,6 +4,27 @@ A macOS-native personal AI assistant that learns who you are.
 
 **Status:** Pre-alpha. See `docs/superpowers/specs/2026-05-22-yuki-macos-design.md` for the full design and `docs/superpowers/plans/` for implementation plans.
 
+## Install
+
+```bash
+brew install --cask mafex11/tap/yuki
+```
+
+On first launch, macOS Gatekeeper blocks unsigned apps. **Right-click `Yuki.app`
+in `/Applications` → Open → confirm** (only needed once). Yuki then walks you
+through granting Accessibility permission and choosing an AI provider
+(Google Gemini free tier, Anthropic, or local Ollama).
+
+Press **⌘⇧A** anywhere to open the command bar.
+
+### Building a release (maintainers)
+
+```bash
+./release.sh 0.1.0                       # builds build/Yuki-0.1.0.zip + prints sha256
+gh release create v0.1.0 build/Yuki-0.1.0.zip
+# then bump version + sha256 in homebrew-tap/Casks/yuki.rb and push the tap
+```
+
 ## Requirements
 
 - macOS 12+
