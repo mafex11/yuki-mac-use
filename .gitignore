@@ -35,3 +35,4 @@ htmlcov/
 # Local secrets
 .env
 .env.local
+.superpowers/
