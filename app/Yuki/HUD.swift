@@ -8,6 +8,7 @@ final class HUD: ObservableObject {
 
     @Published var line = ""
     @Published var state: State = .idle
+    @Published var queuedPreview: String? = nil
     enum State: Equatable { case idle, running, success, failure }
 
     private static let verbMap: [String: String] = [
@@ -23,6 +24,9 @@ final class HUD: ObservableObject {
         line = "Starting…"
         show()
     }
+
+    func setQueued(preview: String) { queuedPreview = preview }
+    func clearQueued() { queuedPreview = nil }
 
     func handle(event o: [String: Any]) {
         guard let type = o["type"] as? String else { return }
@@ -97,10 +101,16 @@ struct HUDView: View {
     @ObservedObject var hud: HUD
 
     var body: some View {
-        HStack(spacing: 10) {
-            icon
-            Text(hud.line).font(.callout).lineLimit(2)
-            Spacer()
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                icon
+                Text(hud.line).font(.callout).lineLimit(2)
+                Spacer()
+            }
+            if let next = hud.queuedPreview {
+                Text("next: \(next)").font(.caption2).foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
         }
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))

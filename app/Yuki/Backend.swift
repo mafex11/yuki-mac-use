@@ -47,6 +47,24 @@ final class Backend {
 
     // MARK: - control (forwards every event to the HUD)
 
+    private var controlTail: Task<Void, Never>?
+
+    /// FIFO-serialize control runs so two desktop tasks never fight the mouse.
+    /// Queued tasks surface as "next:" in the HUD.
+    func enqueueControl(_ msg: String) {
+        let previous = controlTail
+        if previous != nil {
+            HUD.shared.setQueued(preview: msg)
+        }
+        controlTail = Task { @MainActor [weak self] in
+            await previous?.value
+            guard let self else { return }
+            HUD.shared.clearQueued()
+            HUD.shared.begin(task: msg)
+            await self.runControl(msg)
+        }
+    }
+
     func runControl(_ msg: String) async {
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             guard let body = try? JSONSerialization.data(

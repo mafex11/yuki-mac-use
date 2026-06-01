@@ -103,8 +103,7 @@ struct CommandBarView: View {
         let decision = await Backend.shared.route(msg)
         if decision == "control" {
             CommandBar.shared.close()
-            HUD.shared.begin(task: msg)
-            await Backend.shared.runControl(msg)
+            Backend.shared.enqueueControl(msg)
         } else {
             let (reply, badge) = await Backend.shared.chat(msg)
             history.append(Turn(role: "ai", text: reply))
