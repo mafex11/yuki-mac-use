@@ -78,6 +78,7 @@ def create_app() -> FastAPI:
 
     from yuki.backend.routers import (
         chat,
+        facts,
         health,
         memory,
         provider,
@@ -93,6 +94,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(tools.router, dependencies=[Depends(require_token)])
     app.include_router(memory.router, dependencies=[Depends(require_token)])
+    app.include_router(facts.router, dependencies=[Depends(require_token)])
     app.include_router(triggers.router, dependencies=[Depends(require_token)])
     app.include_router(settings.router, dependencies=[Depends(require_token)])
     app.include_router(scan.router, dependencies=[Depends(require_token)])

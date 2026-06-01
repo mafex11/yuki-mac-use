@@ -1,0 +1,44 @@
+"""/facts — flat CRUD over the vault's personalization facts (Memory UI).
+
+Distinct from /memory (search/read/write of arbitrary typed notes). Writing a
+fact creates a free-text IdentityNote; listing spans Identity/People/Projects/
+Apps so the UI shows everything Yuki knows.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+from yuki.backend.runtime import get_runtime
+from yuki.memory import fact_store
+
+router = APIRouter(prefix="/facts", tags=["facts"])
+
+
+class AddFact(BaseModel):
+    text: str
+
+
+@router.get("")
+def list_facts() -> dict[str, Any]:
+    rt = get_runtime()
+    return {"facts": fact_store.list_facts(rt.vault)}
+
+
+@router.post("")
+def add_fact(req: AddFact) -> dict[str, Any]:
+    if not req.text.strip():
+        raise HTTPException(status_code=400, detail="empty fact text")
+    rt = get_runtime()
+    return dict(fact_store.add_identity_fact(rt.vault, req.text))
+
+
+@router.delete("/{fact_id}")
+def delete_fact(fact_id: str) -> dict[str, Any]:
+    rt = get_runtime()
+    if not fact_store.delete_fact(rt.vault, fact_id):
+        raise HTTPException(status_code=404, detail="fact not found")
+    return {"ok": True}
