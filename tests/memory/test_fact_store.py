@@ -83,3 +83,11 @@ def test_delete_fact_removes_it(tmp_vault: Path) -> None:
 def test_delete_missing_fact_returns_false(tmp_vault: Path) -> None:
     v = Vault()
     assert fact_store.delete_fact(v, "does-not-exist") is False
+
+
+def test_title_consistent_between_add_and_list(tmp_vault: Path) -> None:
+    v = Vault()
+    added = fact_store.add_identity_fact(v, "I prefer dark mode everywhere")
+    listed = next(f for f in fact_store.list_facts(v) if f["id"] == added["id"])
+    assert added["title"] == listed["title"]
+    assert added["text"] == listed["text"]

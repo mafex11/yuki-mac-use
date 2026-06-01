@@ -47,10 +47,9 @@ def list_facts(vault: Vault) -> list[Fact]:
     out: list[Fact] = []
     for section, key in _SECTION_KEYS.items():
         for note, body in vault.list_section(section):
-            title = getattr(note, "name", note.id)
+            text = _display_text(note, body)
             out.append(
-                Fact(id=note.id, section=key, title=title,
-                     text=_display_text(note, body))
+                Fact(id=note.id, section=key, title=text[:60], text=text)
             )
     return out
 
