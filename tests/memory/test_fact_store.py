@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+from yuki.memory import fact_store
 from yuki.memory.fact_store import list_facts
 from yuki.memory.schemas import IdentityNote, PersonNote
 from yuki.memory.vault import Vault
@@ -44,3 +45,41 @@ def test_list_facts_groups_by_section(tmp_vault: Path) -> None:
     # each fact has display text
     assert identity["text"]
     assert person["text"]
+
+
+def test_add_identity_fact_then_listed(tmp_vault: Path) -> None:
+    v = Vault()
+    fact = fact_store.add_identity_fact(v, "I prefer dark mode everywhere")
+    assert fact["section"] == "identity"
+    assert fact["text"] == "I prefer dark mode everywhere"
+    listed = fact_store.list_facts(v)
+    assert any(f["id"] == fact["id"] for f in listed)
+
+
+def test_add_identity_fact_slug_is_valid(tmp_vault: Path) -> None:
+    v = Vault()
+    fact = fact_store.add_identity_fact(v, "Uses Linear for tickets!!!")
+    # id is a lowercase kebab slug
+    assert fact["id"]
+    assert fact["id"] == fact["id"].lower()
+    assert " " not in fact["id"]
+
+
+def test_add_two_identical_texts_no_collision(tmp_vault: Path) -> None:
+    v = Vault()
+    a = fact_store.add_identity_fact(v, "Same text")
+    b = fact_store.add_identity_fact(v, "Same text")
+    assert a["id"] != b["id"]
+    assert len(fact_store.list_facts(v)) == 2
+
+
+def test_delete_fact_removes_it(tmp_vault: Path) -> None:
+    v = Vault()
+    fact = fact_store.add_identity_fact(v, "Delete me")
+    assert fact_store.delete_fact(v, fact["id"]) is True
+    assert all(f["id"] != fact["id"] for f in fact_store.list_facts(v))
+
+
+def test_delete_missing_fact_returns_false(tmp_vault: Path) -> None:
+    v = Vault()
+    assert fact_store.delete_fact(v, "does-not-exist") is False
