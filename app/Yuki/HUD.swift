@@ -74,6 +74,16 @@ final class HUD: ObservableObject {
         p.isOpaque = false
         p.backgroundColor = .clear
         p.hasShadow = true
+        // Pure passive overlay while the agent drives other apps:
+        // - ignoresMouseEvents: clicks pass straight through to the app behind
+        //   it, so the pill never intercepts a click the agent aimed elsewhere.
+        // - nonactivating + never-key: it never steals focus from the app the
+        //   agent is controlling.
+        // - canJoinAllSpaces + stationary: stays visible as the agent switches
+        //   apps/spaces, without itself becoming the focused window.
+        p.ignoresMouseEvents = true
+        p.hidesOnDeactivate = false
+        p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         p.contentView = NSHostingView(rootView: HUDView(hud: self))
         panel = p
     }
