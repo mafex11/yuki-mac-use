@@ -9,6 +9,7 @@ struct YukiApp: App {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let backend = BackendController()
     private let menu = MenuBar()
@@ -19,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 let token = try Token.generate()
                 let port = try await backend.startAndWaitForHealth(token: token)
-                menu.attach(token: token, port: port)
+                menu.attach()
                 hotkey.register(
                     onTap: { CommandBar.shared.toggle() },
                     onLongPress: { BurstBridge.engage(token: token, port: port) }

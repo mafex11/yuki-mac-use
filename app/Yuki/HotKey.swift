@@ -17,7 +17,7 @@ final class HotKey {
         let signature: OSType = OSType("YUKI".fourCharCode)
         let hotKeyID = EventHotKeyID(signature: signature, id: 1)
         let modifiers: UInt32 = UInt32(cmdKey | shiftKey)
-        let keycode: UInt32 = 16 // 'Y'
+        let keycode: UInt32 = 0 // 'A'
         RegisterEventHotKey(keycode, modifiers, hotKeyID,
                             GetApplicationEventTarget(), 0, &hotKeyRef)
 

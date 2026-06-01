@@ -1,40 +1,52 @@
 import AppKit
 
+@MainActor
 final class MenuBar {
     private var statusItem: NSStatusItem?
+    private var pollTimer: Timer?
 
-    func attach(token: String, port: Int) {
+    func attach() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.title = "Y"
         let menu = NSMenu()
-        let chatItem = NSMenuItem(title: "Open chat",
-                                   action: #selector(openChat),
-                                   keyEquivalent: "")
-        chatItem.target = self
-        menu.addItem(chatItem)
-        let uiItem = NSMenuItem(title: "Open full UI",
-                                 action: #selector(openUI),
-                                 keyEquivalent: "")
-        uiItem.target = self
-        menu.addItem(uiItem)
+
+        let bar = NSMenuItem(title: "Open command bar",
+                             action: #selector(openBar), keyEquivalent: "")
+        bar.target = self
+        menu.addItem(bar)
+
+        let settings = NSMenuItem(title: "Settings…",
+                                  action: #selector(openSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
+
+        let logs = NSMenuItem(title: "Reveal logs in Finder",
+                              action: #selector(revealLogs), keyEquivalent: "")
+        logs.target = self
+        menu.addItem(logs)
+
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit Yuki",
-                                 action: #selector(NSApplication.terminate(_:)),
-                                 keyEquivalent: "q"))
+                                action: #selector(NSApplication.terminate(_:)),
+                                keyEquivalent: "q"))
         item.menu = menu
         statusItem = item
-        UserDefaults.standard.set(token, forKey: "yuki.token")
-        UserDefaults.standard.set(port, forKey: "yuki.port")
+
+        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.statusItem?.button?.title =
+                    HUD.shared.state == .running ? "◌" : "Y"
+            }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        pollTimer = t
     }
 
-    @MainActor @objc private func openChat() {
-        CommandBar.shared.toggle()
-    }
+    @objc private func openBar() { CommandBar.shared.toggle() }
+    @objc private func openSettings() { SettingsWindow.show() }
 
-    @objc private func openUI() {
-        let token = UserDefaults.standard.string(forKey: "yuki.token") ?? ""
-        let port = UserDefaults.standard.integer(forKey: "yuki.port")
-        let url = URL(string: "http://127.0.0.1:\(port)/?token=\(token)")!
-        NSWorkspace.shared.open(url)
+    @objc private func revealLogs() {
+        let dir = NSHomeDirectory() + "/Library/Application Support/Yuki"
+        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: dir)
     }
 }
