@@ -165,6 +165,7 @@ struct MemorySettings: View {
     @State private var learner = true
     @State private var ask = true
     @State private var loaded = false
+    @State private var didLoad = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -207,11 +208,15 @@ struct MemorySettings: View {
             Divider()
             Toggle("Daily learning (distill tasks into reusable notes)", isOn: $learner)
                 .onChange(of: learner) { on in
-                    Task { await Backend.shared.setMemorySettings(learner: on) }
-                    LaunchAgentManager.reconcile(enabled: on)
+                    guard didLoad else { return }
+                    Task {
+                        await Backend.shared.setMemorySettings(learner: on)
+                        LaunchAgentManager.reconcile(enabled: on)
+                    }
                 }
             Toggle("Ask before remembering things from chat", isOn: $ask)
                 .onChange(of: ask) { on in
+                    guard didLoad else { return }
                     Task { await Backend.shared.setMemorySettings(ask: on) }
                 }
         }
@@ -223,6 +228,7 @@ struct MemorySettings: View {
                 let s = await Backend.shared.memorySettings()
                 learner = s.learner
                 ask = s.ask
+                didLoad = true
                 await reload()
             }
         }
