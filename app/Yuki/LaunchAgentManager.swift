@@ -44,14 +44,20 @@ enum LaunchAgentManager {
                 fromPropertyList: plist, format: .xml, options: 0)
             try data.write(to: plistURL)
             run(["launchctl", "unload", plistURL.path])  // idempotent
-            run(["launchctl", "load", plistURL.path])
+            let loadStatus = run(["launchctl", "load", plistURL.path])
+            if loadStatus != 0 {
+                NSLog("learner: launchctl load exited \(loadStatus)")
+            }
         } catch {
             NSLog("learner: failed to install LaunchAgent: \(error)")
         }
     }
 
     static func disable() {
-        run(["launchctl", "unload", plistURL.path])
+        let status = run(["launchctl", "unload", plistURL.path])
+        if status != 0 {
+            NSLog("learner: launchctl unload exited \(status) (may already be unloaded)")
+        }
         try? FileManager.default.removeItem(at: plistURL)
     }
 
@@ -62,10 +68,16 @@ enum LaunchAgentManager {
 
     @discardableResult
     private static func run(_ args: [String]) -> Int32 {
+        guard let first = args.first else { return -1 }
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", args.map { "'\($0)'" }.joined(separator: " ")]
+        // launchctl lives at /bin/launchctl; resolve via /usr/bin/env so we
+        // don't hardcode an absolute path but still avoid shell interpretation.
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        p.arguments = [first] + Array(args.dropFirst())
         do { try p.run(); p.waitUntilExit(); return p.terminationStatus }
-        catch { return -1 }
+        catch {
+            NSLog("learner: command \(args.first ?? "?") failed: \(error)")
+            return -1
+        }
     }
 }
