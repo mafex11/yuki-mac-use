@@ -59,6 +59,10 @@ final class Backend {
         controlTail = Task { @MainActor [weak self] in
             await previous?.value
             guard let self else { return }
+            // NOTE(v0.1): single-slot queued preview — with 3+ tasks queued at
+            // once, starting one clears the "next:" line even though more remain.
+            // Acceptable for v0.1 (users rarely queue >1); a real fix needs a
+            // queue-depth counter or an ordered pending list.
             HUD.shared.clearQueued()
             HUD.shared.begin(task: msg)
             await self.runControl(msg)
