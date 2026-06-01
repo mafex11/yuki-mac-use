@@ -21,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let port = try await backend.startAndWaitForHealth(token: token)
                 menu.attach(token: token, port: port)
                 hotkey.register(
-                    onTap: { ChatOverlay.toggle(token: token, port: port) },
+                    onTap: { CommandBar.shared.toggle() },
                     onLongPress: { BurstBridge.engage(token: token, port: port) }
                 )
             } catch {

@@ -28,10 +28,7 @@ final class MenuBar {
     }
 
     @MainActor @objc private func openChat() {
-        ChatOverlay.toggle(
-            token: UserDefaults.standard.string(forKey: "yuki.token") ?? "",
-            port: UserDefaults.standard.integer(forKey: "yuki.port")
-        )
+        CommandBar.shared.toggle()
     }
 
     @objc private func openUI() {
