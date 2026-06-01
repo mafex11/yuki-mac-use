@@ -5,6 +5,7 @@
   <key>CFBundleIdentifier</key><string>com.yuki.app</string>
   <key>CFBundleName</key><string>Yuki</string>
   <key>CFBundleExecutable</key><string>Yuki</string>
+  <key>CFBundleIconFile</key><string>Yuki</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>

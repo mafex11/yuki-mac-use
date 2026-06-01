@@ -29,6 +29,9 @@ chmod +x "$CONTENTS/MacOS/Yuki"
 echo "==> Copy Info.plist"
 cp "$ROOT/app/Yuki/Info.plist" "$CONTENTS/Info.plist"
 
+echo "==> Copy app icon"
+cp "$ROOT/packaging/icon/Yuki.icns" "$RES/Yuki.icns"
+
 echo "==> Fetch python-build-standalone ($PBS_PY)"
 curl -fsSL "$PBS_URL" -o "$BUILD/python.tar.gz"
 mkdir -p "$PYDIR"

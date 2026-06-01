@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Minimalist Yuki icon: flat off-black squircle, clean off-white Y. No gradients. -->
+  <rect x="0" y="0" width="1024" height="1024" rx="228" ry="228" fill="#1c1c1e"/>
+  <!-- The Y: two upper arms meeting a vertical stem, rounded caps, geometric. -->
+  <g fill="none" stroke="#f5f5f7" stroke-width="86" stroke-linecap="round" stroke-linejoin="round">
+    <!-- left arm -->
+    <path d="M 326 300 L 512 540"/>
+    <!-- right arm -->
+    <path d="M 698 300 L 512 540"/>
+    <!-- stem -->
+    <path d="M 512 540 L 512 724"/>
+  </g>
+</svg>
