@@ -23,6 +23,7 @@ actor BackendController {
         let bundledPython = res?
             .appendingPathComponent("python/bin/python3").path
 
+        let timeout: TimeInterval
         if let bundledPython = bundledPython,
            FileManager.default.fileExists(atPath: bundledPython) {
             // Bundled (production) mode.
@@ -34,12 +35,14 @@ actor BackendController {
             env["TIKTOKEN_CACHE_DIR"] = res!
                 .appendingPathComponent("tiktoken").path
             p.environment = env
+            timeout = 25
         } else {
             // Dev fallback: run from the repo via uv.
             p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             p.arguments = ["uv", "run", "python", "-m", "yuki.backend.cli", "--uds"]
             p.currentDirectoryURL = URL(
                 fileURLWithPath: Self.devRepoRoot())
+            timeout = 90
         }
 
         // Pipe Python stdio to a log file.
@@ -53,7 +56,13 @@ actor BackendController {
 
         try p.run()
         self.process = p
-        try await waitForSocket()
+        do {
+            try await waitForSocket(timeout: timeout)
+        } catch {
+            p.terminate()
+            self.process = nil
+            throw error
+        }
     }
 
     func stop() {
@@ -61,9 +70,9 @@ actor BackendController {
         process = nil
     }
 
-    private func waitForSocket() async throws {
+    private func waitForSocket(timeout: TimeInterval) async throws {
         let client = UDSClient(socketPath: socketPath)
-        let deadline = Date().addingTimeInterval(25)
+        let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if FileManager.default.fileExists(atPath: socketPath) {
                 if let _ = try? await client.getJSON(path: "/healthz") {
