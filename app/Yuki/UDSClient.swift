@@ -28,11 +28,22 @@ final class UDSClient {
     private func sendBuffered(method: String, path: String, body: Data) async throws -> Data {
         try await withCheckedThrowingContinuation { cont in
             let conn = makeConnection()
+            // SAFETY: NWConnection delivers receive callbacks serially per
+            // connection, so `received` is mutated single-threaded. The resume
+            // guard, however, can be hit from state/send/receive callbacks
+            // concurrently, so it needs a lock to avoid a double continuation
+            // resume (which is a hard crash).
             var received = Data()
+            let resumeLock = NSLock()
             var resumed = false
             func finish(_ result: Result<Data, Error>) {
-                if resumed { return }
+                resumeLock.lock()
+                if resumed {
+                    resumeLock.unlock()
+                    return
+                }
                 resumed = true
+                resumeLock.unlock()
                 conn.cancel()
                 cont.resume(with: result)
             }
@@ -67,10 +78,16 @@ final class UDSClient {
         let conn = makeConnection()
         var buffer = Data()
         var headersDone = false
+        let finishLock = NSLock()
         var finished = false
         func done() {
-            if finished { return }
+            finishLock.lock()
+            if finished {
+                finishLock.unlock()
+                return
+            }
             finished = true
+            finishLock.unlock()
             conn.cancel()
             onDone()
         }
