@@ -4,11 +4,20 @@ from typing import Literal,Optional
 from yuki.tools import Tool
 from pathlib import Path
 from time import sleep
+import os
 from yuki.memory import frontmatter as _fm
 from yuki.memory import paths as _paths
 
-memory_path=Path.cwd()/'.memories'
-memory_path.mkdir(parents=True, exist_ok=True)
+# Memory scratch dir. Must NOT be cwd-relative: when the app is launched from
+# Finder cwd is "/", and `mkdir /.memories` fails on the read-only system
+# volume, crashing the backend at import. Anchor it in the app-support dir
+# (override with YUKI_MEMORY_DIR). mkdir is best-effort so a transient failure
+# never takes down the whole import.
+memory_path = Path(os.environ.get("YUKI_MEMORY_DIR") or (_paths.app_support_dir() / "memories"))
+try:
+    memory_path.mkdir(parents=True, exist_ok=True)
+except OSError:
+    pass
 
 _SCRAPE_MAX_CHARS = 20_000
 
