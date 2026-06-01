@@ -56,6 +56,22 @@ TIKTOKEN_CACHE_DIR="$RES/tiktoken" \
   "$PYDIR/bin/python3" -c "import tiktoken; tiktoken.get_encoding('cl100k_base')" \
   || echo "warning: tiktoken preload failed (will download at first use)"
 
+# Deep ad-hoc sign the FULLY-ASSEMBLED bundle. This MUST be the last step
+# before zipping: `swift build` only linker-signs the executable, and copying
+# Python/resources in afterward breaks that seal ("code has no resources but
+# signature indicates they must be present"). A broken seal makes macOS refuse
+# to persist the Accessibility (TCC) grant — you grant it, it silently reverts.
+#
+# A stable --identifier (com.yuki.app, not the default CFBundleExecutable
+# "Yuki") also gives TCC a consistent identity to track. The app stays
+# UNNOTARIZED, so each rebuild still changes the cdhash and the user must
+# re-grant once per update — but within a version the grant now sticks.
+echo "==> Deep ad-hoc sign the assembled bundle"
+codesign --force --deep --sign - --identifier com.yuki.app "$APP"
+codesign --verify --deep --strict "$APP" \
+  && echo "    signature: valid (deep seal over all contents)" \
+  || { echo "ERROR: bundle signature failed to verify"; exit 1; }
+
 echo "==> Zip the app"
 ( cd "$BUILD" && ditto -c -k --keepParent "Yuki.app" "Yuki-${VERSION}.zip" )
 SHA=$(shasum -a 256 "$BUILD/Yuki-${VERSION}.zip" | cut -d' ' -f1)
