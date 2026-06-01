@@ -68,10 +68,11 @@ struct GeneralSettings: View {
 }
 
 struct ProviderSettings: View {
-    @AppStorage("yuki.provider") private var provider = "google"
+    @State private var provider = "google"
     @State private var apiKey = ""
     @State private var testResult = ""
     @State private var testing = false
+    @State private var loaded = false
 
     var body: some View {
         Form {
@@ -90,6 +91,13 @@ struct ProviderSettings: View {
             }
         }
         .padding()
+        .onAppear {
+            // Reflect the provider the backend actually uses, not a local
+            // default — so Settings agrees with first-run + app_state.json.
+            guard !loaded else { return }
+            loaded = true
+            Task { provider = await Backend.shared.currentProvider() }
+        }
     }
 
     private func save() {
@@ -103,6 +111,8 @@ struct ProviderSettings: View {
         testing = true
         save()
         Task {
+            // Give saveProvider a beat to persist before testing.
+            try? await Task.sleep(nanoseconds: 200_000_000)
             let ok = await Backend.shared.testConnection()
             testResult = ok ? "✓ Connected" : "✗ Failed"
             testing = false

@@ -14,6 +14,15 @@ class ProviderConfig(BaseModel):
     model: str | None = None
 
 
+@router.get("")
+async def get_provider() -> dict[str, str]:
+    state = appstate.load()
+    return {
+        "provider": str(state.get("llm_provider", "google")),
+        "model": str(state.get("llm_model", "")),
+    }
+
+
 @router.post("")
 async def set_provider(cfg: ProviderConfig) -> dict[str, str]:
     state = appstate.load()

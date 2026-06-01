@@ -114,6 +114,16 @@ final class Backend {
 
     // MARK: - provider config (first-run / settings)
 
+    /// The provider the backend is actually configured to use (from
+    /// app_state.json), so the UI reflects reality instead of a local default.
+    func currentProvider() async -> String {
+        guard let data = try? await client.getJSON(path: "/settings/provider"),
+              let o = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any]
+        else { return "google" }
+        return (o["provider"] as? String) ?? "google"
+    }
+
     func saveProvider(_ provider: String, model: String? = nil) async {
         var payload: [String: Any] = ["provider": provider]
         if let model = model { payload["model"] = model }
