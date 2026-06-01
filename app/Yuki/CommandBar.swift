@@ -8,8 +8,9 @@ final class KeyablePanel: NSPanel {
     override var canBecomeMain: Bool { true }
 
     override func cancelOperation(_ sender: Any?) {
-        // Esc closes the command bar.
-        orderOut(nil)
+        // Esc closes the command bar (via the shared controller so the
+        // click monitor is torn down too).
+        CommandBar.shared.close()
     }
 }
 
@@ -18,6 +19,12 @@ final class CommandBar {
     static let shared = CommandBar()
     private var panel: NSPanel?
     private var clickMonitor: Any?
+
+    /// True while a control task is streaming into the bar. Suppresses
+    /// click-outside dismissal so the agent driving OTHER apps (which the
+    /// global monitor would otherwise see as an outside click) can't close
+    /// the bar mid-task.
+    var isRunningControl = false
 
     static let focusRequest = Notification.Name("yuki.commandbar.focus")
 
@@ -53,8 +60,8 @@ final class CommandBar {
         guard clickMonitor == nil else { return }
         clickMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
-            // A click landed in ANOTHER app → dismiss.
-            self?.close()
+            guard let self, !self.isRunningControl else { return }
+            self.close()
         }
     }
 
@@ -188,6 +195,7 @@ struct CommandBarView: View {
         busy = true
         let decision = await Backend.shared.route(msg)
         if decision == "control" {
+            CommandBar.shared.isRunningControl = true
             liveActivity = "Working on it…"
             await Backend.shared.runControlInBar(msg) { ev in
                 let type = ev["type"] as? String
@@ -205,6 +213,7 @@ struct CommandBarView: View {
                 }
             }
             liveActivity = nil
+            CommandBar.shared.isRunningControl = false
         } else {
             liveActivity = "Thinking…"
             let (reply, badge) = await Backend.shared.chat(msg)
