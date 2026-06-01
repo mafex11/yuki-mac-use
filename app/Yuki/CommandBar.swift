@@ -45,7 +45,7 @@ final class CommandBar {
 
     private func build() {
         let p = KeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 120),
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 420),
             styleMask: [.borderless],
             backing: .buffered, defer: false)
         p.level = .floating
@@ -61,8 +61,8 @@ final class CommandBar {
     private func position() {
         guard let p = panel, let screen = NSScreen.main else { return }
         let f = screen.visibleFrame
-        let x = f.midX - 360
-        let y = f.maxY - f.height * 0.30
+        let x = f.midX - p.frame.width / 2
+        let y = f.maxY - f.height * 0.20 - p.frame.height
         p.setFrameOrigin(NSPoint(x: x, y: y))
     }
 }
@@ -81,35 +81,58 @@ struct CommandBarView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header: title + ctx badge
             HStack {
                 Text("yuki").font(.headline).foregroundStyle(.secondary)
                 Spacer()
                 Text(ctxBadge).font(.caption).foregroundStyle(.tertiary)
             }
-            if !history.isEmpty {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(history) { turn in
-                            Text(turn.role == "human" ? "> \(turn.text)" : turn.text)
-                                .font(.callout)
-                                .foregroundStyle(turn.role == "human"
-                                                 ? .primary : .secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                }
-                .frame(maxHeight: 200)
-            }
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 8)
+
+            // Input at the top, command-bar style.
             TextField("Ask Yuki…", text: $input)
                 .textFieldStyle(.plain)
-                .font(.title3)
+                .font(.title2)
                 .disabled(busy)
                 .focused($inputFocused)
                 .onSubmit { submit() }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 12)
+
+            if busy {
+                ProgressView().controlSize(.small)
+                    .padding(.horizontal, 16).padding(.bottom, 8)
+            }
+
+            Divider()
+
+            // Conversation scrolls below the input. Most-recent at bottom.
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(history) { turn in
+                            Text(turn.role == "human" ? "❯ \(turn.text)" : turn.text)
+                                .font(.callout)
+                                .textSelection(.enabled)
+                                .foregroundStyle(turn.role == "human"
+                                                 ? .secondary : .primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .id(turn.id)
+                        }
+                    }
+                    .padding(16)
+                }
+                .onChange(of: history.count) { _ in
+                    if let last = history.last {
+                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    }
+                }
+            }
         }
-        .padding(16)
-        .frame(width: 720)
+        .frame(width: 720, height: 420)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
         .onAppear {
             loadStatus()
