@@ -48,6 +48,30 @@ async def set_key(body: ProviderKey) -> dict[str, str]:
     return {"ok": "true"}
 
 
+@router.get("/ollama/models")
+async def list_ollama_models() -> dict[str, object]:
+    """List models installed in the local Ollama (equivalent to `ollama list`).
+
+    Returns {"running": bool, "models": [name, ...]}. running=False means
+    Ollama isn't reachable, so the UI can fall back to manual model entry.
+    """
+    try:
+        import ollama
+
+        resp = ollama.Client().list()
+        raw = getattr(resp, "models", resp)
+        names: list[str] = []
+        for m in raw:
+            name = getattr(m, "model", None) or getattr(m, "name", None)
+            if name is None and isinstance(m, dict):
+                name = m.get("model") or m.get("name")
+            if name:
+                names.append(str(name))
+        return {"running": True, "models": names}
+    except Exception:
+        return {"running": False, "models": []}
+
+
 @router.get("/test")
 async def test_provider() -> dict[str, bool]:
     try:

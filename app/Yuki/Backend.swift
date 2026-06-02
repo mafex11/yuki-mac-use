@@ -126,6 +126,37 @@ final class Backend {
         return (o["provider"] as? String) ?? "google"
     }
 
+    /// The model the backend is configured to use (from app_state.json), so
+    /// the Ollama picker can highlight the active model.
+    func currentModel() async -> String {
+        guard let data = try? await client.getJSON(path: "/settings/provider"),
+              let o = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any]
+        else { return "" }
+        return (o["model"] as? String) ?? ""
+    }
+
+    /// Read the saved api key straight from the Keychain (the app is the
+    /// trusted binary). Used to prepopulate the Settings field so the user
+    /// sees their key is stored.
+    func savedKey(for provider: String) -> String {
+        guard provider == "google" || provider == "anthropic" else { return "" }
+        return Keychain.get(account: provider) ?? ""
+    }
+
+    /// Installed local Ollama models (`ollama list`). `running` is false when
+    /// Ollama isn't reachable, so the UI can fall back to manual entry.
+    func ollamaModels() async -> (running: Bool, models: [String]) {
+        guard let data = try? await client.getJSON(
+                path: "/settings/provider/ollama/models"),
+              let o = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any]
+        else { return (false, []) }
+        let running = o["running"] as? Bool ?? false
+        let models = o["models"] as? [String] ?? []
+        return (running, models)
+    }
+
     func saveProvider(_ provider: String, model: String? = nil) async {
         var payload: [String: Any] = ["provider": provider]
         if let model = model { payload["model"] = model }

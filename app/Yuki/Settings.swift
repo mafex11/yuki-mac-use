@@ -10,7 +10,7 @@ enum SettingsWindow {
     static func show() {
         if window == nil {
             let w = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 480, height: 420),
+                contentRect: NSRect(x: 0, y: 0, width: 620, height: 460),
                 styleMask: [.titled, .closable],
                 backing: .buffered, defer: false)
             w.title = "Yuki Settings"
@@ -33,7 +33,7 @@ struct SettingsView: View {
             MemorySettings().tabItem { Label("Memory", systemImage: "brain.head.profile") }
             AboutSettings().tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 480, height: 420)
+        .frame(width: 620, height: 460)
         .padding()
     }
 }
@@ -71,9 +71,15 @@ struct GeneralSettings: View {
 struct ProviderSettings: View {
     @State private var provider = "google"
     @State private var apiKey = ""
+    @State private var keyAlreadySaved = false
     @State private var testResult = ""
     @State private var testing = false
     @State private var loaded = false
+
+    // Ollama model selection
+    @State private var ollamaModels: [String] = []
+    @State private var ollamaModel = ""
+    @State private var ollamaRunning = true
 
     var body: some View {
         Form {
@@ -82,9 +88,23 @@ struct ProviderSettings: View {
                 Text("Anthropic Claude").tag("anthropic")
                 Text("Local (Ollama)").tag("ollama")
             }
-            if provider != "ollama" {
-                SecureField("API key (leave blank to keep existing)", text: $apiKey)
+            .onChange(of: provider) { _ in
+                guard loaded else { return }
+                reloadForProvider()
             }
+
+            if provider == "ollama" {
+                ollamaSection
+            } else {
+                SecureField(keyAlreadySaved
+                            ? "API key (saved — leave blank to keep)"
+                            : "API key", text: $apiKey)
+                if keyAlreadySaved && apiKey.isEmpty {
+                    Label("Key saved for \(provider)", systemImage: "checkmark.seal.fill")
+                        .font(.caption).foregroundStyle(.green)
+                }
+            }
+
             HStack {
                 Button("Save") { save() }
                 Button(testing ? "Testing…" : "Test") { test() }.disabled(testing)
@@ -93,17 +113,66 @@ struct ProviderSettings: View {
         }
         .padding()
         .onAppear {
-            // Reflect the provider the backend actually uses, not a local
-            // default — so Settings agrees with first-run + app_state.json.
+            // Reflect the provider/model the backend actually uses, not a
+            // local default — so Settings agrees with app_state.json.
             guard !loaded else { return }
             loaded = true
-            Task { provider = await Backend.shared.currentProvider() }
+            Task {
+                provider = await Backend.shared.currentProvider()
+                reloadForProvider()
+            }
+        }
+    }
+
+    @ViewBuilder private var ollamaSection: some View {
+        if ollamaRunning && !ollamaModels.isEmpty {
+            Picker("Model", selection: $ollamaModel) {
+                ForEach(ollamaModels, id: \.self) { m in Text(m).tag(m) }
+            }
+            .onChange(of: ollamaModel) { m in
+                guard loaded, !m.isEmpty else { return }
+                Task { await Backend.shared.saveProvider("ollama", model: m) }
+            }
+        } else {
+            Label("Ollama not reachable — start it, then reopen Settings",
+                  systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.secondary)
+            TextField("Model name (e.g. qwen3-vl:8b)", text: $ollamaModel)
+                .textFieldStyle(.roundedBorder)
+        }
+    }
+
+    /// Refresh the key indicator + Ollama models for the selected provider.
+    private func reloadForProvider() {
+        apiKey = ""
+        testResult = ""
+        if provider == "ollama" {
+            keyAlreadySaved = false
+            Task {
+                let r = await Backend.shared.ollamaModels()
+                ollamaRunning = r.running
+                ollamaModels = r.models
+                let saved = await Backend.shared.currentModel()
+                // Prefer the saved model if it's installed; else first available.
+                if r.models.contains(saved) { ollamaModel = saved }
+                else if let first = r.models.first { ollamaModel = first }
+                else { ollamaModel = saved }
+            }
+        } else {
+            keyAlreadySaved = !Backend.shared.savedKey(for: provider).isEmpty
         }
     }
 
     private func save() {
-        if provider != "ollama" && !apiKey.isEmpty {
+        if provider == "ollama" {
+            let m = ollamaModel.trimmingCharacters(in: .whitespaces)
+            Task { await Backend.shared.saveProvider("ollama", model: m.isEmpty ? nil : m) }
+            return
+        }
+        if !apiKey.isEmpty {
             Keychain.set(apiKey, account: provider)
+            keyAlreadySaved = true
+            apiKey = ""
         }
         Task {
             await Backend.shared.saveProvider(provider)
@@ -174,20 +243,13 @@ struct MemorySettings: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(facts) { fact in
-                        HStack(alignment: .top) {
-                            Text(fact.section.uppercased())
-                                .font(.caption2).foregroundStyle(.secondary)
-                                .frame(width: 64, alignment: .leading)
-                            Text(fact.text).font(.callout)
-                            Spacer()
-                            Button(role: .destructive) {
-                                Task {
-                                    await Backend.shared.forgetFact(id: fact.id)
-                                    await reload()
-                                }
-                            } label: { Image(systemName: "minus.circle") }
-                                .buttonStyle(.borderless)
+                        FactRow(fact: fact) {
+                            Task {
+                                await Backend.shared.forgetFact(id: fact.id)
+                                await reload()
+                            }
                         }
+                        Divider()
                     }
                     if facts.isEmpty {
                         Text("Nothing yet. Add a fact below, or just tell Yuki about yourself in chat.")
@@ -195,7 +257,7 @@ struct MemorySettings: View {
                     }
                 }
             }
-            .frame(maxHeight: 160)
+            .frame(maxHeight: 200)
 
             HStack {
                 TextField("Add a fact (e.g. I use Linear for tickets)", text: $newFact)
@@ -245,4 +307,37 @@ struct MemorySettings: View {
     }
 
     private func reload() async { facts = await Backend.shared.facts() }
+}
+
+/// One fact row: section chip + text truncated to 4 lines with a Show
+/// more/less toggle, plus a delete button.
+struct FactRow: View {
+    let fact: Backend.Fact
+    let onDelete: () -> Void
+    @State private var expanded = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(fact.section.uppercased())
+                .font(.caption2).foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(fact.text)
+                    .font(.callout)
+                    .lineLimit(expanded ? nil : 4)
+                    .textSelection(.enabled)
+                // Only offer expand when the text is long enough to be clipped.
+                if fact.text.count > 200 {
+                    Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
+                        .font(.caption2)
+                        .buttonStyle(.borderless)
+                }
+            }
+            Spacer()
+            Button(role: .destructive, action: onDelete) {
+                Image(systemName: "minus.circle")
+            }
+            .buttonStyle(.borderless)
+        }
+    }
 }
