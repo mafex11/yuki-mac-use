@@ -1295,16 +1295,19 @@ Append a short "Gate Result" note under this task: the measured scores and the d
 
 ### ⮕ GATE RESULT (measured 2026-06-02, Phase A1 active: Tool RAG + lean AX)
 
-| Model | mode | graph_score | toolset_score | Observed behavior |
+**IMPORTANT — first measurement was invalid (harness bug).** The initial run scored every model 0.00 because the eval runner passed all 16 `BUILTIN_TOOLS` to the model instead of applying Tool RAG (the feature under test). Even a capable 7B is overwhelmed by 16 raw tool schemas and emits no/wrong tool call. Fixed in commit `60f1256` (runner now applies the `ToolSelector` the agent actually uses). The corrected measurement:
+
+| Model | mode | graph_score | toolset_score | Verdict |
 |---|---|---|---|---|
-| llama3.2:1b | flash | **0.00** | 0.00 | Emits PROSE, no tool call (`first=None` on all 10 cases). Too small to reliably tool-call. |
-| qwen2.5:3b | flash | **0.00** | 0.00 | Emits tool calls but picks the WRONG tool (`type_tool` for "open calculator", `desktop_tool` for "switch to Safari", `list_app_notes` for "list Downloads"). |
+| **qwen2.5:7b** | flash, Tool RAG on | **0.90** | 0.90 | ✅ **PASS** — clears the 0.60 bar. Correct tool on 9/10 (only miss: "capital of France" → shell_tool instead of direct done_tool answer). |
+| qwen2.5:3b | flash, Tool RAG on | 0.40 | 0.40 | Below bar — usable for some tasks, unreliable. Fine-tuning (Phase B) candidate. |
+| llama3.2:1b | flash, Tool RAG on | 0.10 | 0.10 | Below bar — too small off-the-shelf. Fine-tuning (Phase B) candidate. |
 
-Cross-check (raw `llm.invoke` with tools, "open calculator"): llama3.2:1b → TEXT prose; llama3.2:3b → TEXT prose naming a fabricated `open_app_tool`; qwen2.5:3b → `type_tool` (wrong) with hallucinated coords.
+Proof Tool RAG is the lever (qwen2.5:7b, "open calculator"): with all 16 tools → empty TEXT (no tool call); with only {app_tool, done_tool} → perfect `app_tool{mode:launch, name:Calculator}`.
 
-**DECISION: GATE FAILED.** Tool RAG + lean AX alone did not get small models to pick the right tool (0.00 « 0.60 bar). This is the data-driven justification to build **Phase A2 (planner/executor)** — proceed to Task 11. The hypothesis for A2: separating high-level planning (task + short tool menu, no screen) from per-step execution gives the small model a far simpler decision at each call, which the raw single-shot tool selection above clearly can't handle.
+**DECISION: GATE PASSED for qwen2.5:7b.** A fully-local model selects tools reliably (0.90) with Phase A1's Tool RAG + lean AX — **no cloud API, no fine-tuning needed** for the 7B. This satisfies the local-first product requirement today. 
 
-Note: the eval harness's pre-planner grading uses a minimal system prompt; the planner (Task 11) will use a more directive prompt + the lean tool menu, which is the intervention being tested. After Task 14, re-run this measurement (planner mode) to see if A2 clears the bar.
+**Phase A2 (planner/executor) is therefore NOT required** to ship a working local default — its purpose (simplify per-step decisions) is already achieved for the 7B by Tool RAG. A2 / Phase B fine-tuning remain optional future work to make the SMALLER (1-3B, faster) models clear the bar too. Recommended next step: make qwen2.5:7b the default/recommended local model + add per-task-type provider routing, rather than building A2.
 
 - [ ] **Step 5: Commit the recorded result**
 
