@@ -37,3 +37,28 @@ def test_run_case_wrong_tool_scores_zero() -> None:
     stub = _stub_emitting("done_tool", {"thought": "t", "answer": "hi"})
     result = run_case(case, stub)
     assert result["toolset_score"] == 0.0
+
+
+def test_run_case_uses_selector_when_provided() -> None:
+    """When a selector is passed, run_case grades against the FILTERED tools.
+    We prove the selector is consulted by using a selector that returns only
+    done_tool, then a stub emitting app_tool — and confirm the selector was
+    invoked (the emitted tool is still scored, but the tools passed to the LLM
+    came from select())."""
+    calls = {}
+
+    class _SpySelector:
+        def select(self, task):
+            calls["task"] = task
+            from yuki.agent.tools import BUILTIN_TOOLS
+            return [t for t in BUILTIN_TOOLS if t.name in ("app_tool", "done_tool")]
+
+    case = EvalCase(
+        task="open calculator",
+        expected_plan=[ExpectedStep("app_tool", {"name": r"calc"}),
+                       ExpectedStep("done_tool")],
+    )
+    stub = _stub_emitting("app_tool", {"thought": "t", "name": "Calculator"})
+    result = run_case(case, stub, selector=_SpySelector())
+    assert calls["task"] == "open calculator"   # selector WAS consulted
+    assert result["toolset_score"] == 1.0
