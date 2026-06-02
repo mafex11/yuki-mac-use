@@ -1293,6 +1293,19 @@ Append a short "Gate Result" note under this task: the measured scores and the d
 - **PASS** if small models reach **graph_score ≥ 0.6 on non-reactive cases** (i.e. they reliably pick the right first tool for simple tasks — the failure we set out to fix). → **Skip Tasks 11-14**, jump to Phase B (Task 15).
 - **FAIL** otherwise → proceed to Task 11 (build the planner/executor), then re-run this measurement after Task 14.
 
+### ⮕ GATE RESULT (measured 2026-06-02, Phase A1 active: Tool RAG + lean AX)
+
+| Model | mode | graph_score | toolset_score | Observed behavior |
+|---|---|---|---|---|
+| llama3.2:1b | flash | **0.00** | 0.00 | Emits PROSE, no tool call (`first=None` on all 10 cases). Too small to reliably tool-call. |
+| qwen2.5:3b | flash | **0.00** | 0.00 | Emits tool calls but picks the WRONG tool (`type_tool` for "open calculator", `desktop_tool` for "switch to Safari", `list_app_notes` for "list Downloads"). |
+
+Cross-check (raw `llm.invoke` with tools, "open calculator"): llama3.2:1b → TEXT prose; llama3.2:3b → TEXT prose naming a fabricated `open_app_tool`; qwen2.5:3b → `type_tool` (wrong) with hallucinated coords.
+
+**DECISION: GATE FAILED.** Tool RAG + lean AX alone did not get small models to pick the right tool (0.00 « 0.60 bar). This is the data-driven justification to build **Phase A2 (planner/executor)** — proceed to Task 11. The hypothesis for A2: separating high-level planning (task + short tool menu, no screen) from per-step execution gives the small model a far simpler decision at each call, which the raw single-shot tool selection above clearly can't handle.
+
+Note: the eval harness's pre-planner grading uses a minimal system prompt; the planner (Task 11) will use a more directive prompt + the lean tool menu, which is the intervention being tested. After Task 14, re-run this measurement (planner mode) to see if A2 clears the bar.
+
 - [ ] **Step 5: Commit the recorded result**
 
 ```bash
