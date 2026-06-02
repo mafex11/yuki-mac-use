@@ -49,17 +49,19 @@ async def set_key(body: ProviderKey) -> dict[str, str]:
 
 
 # Curated tool-capable models Yuki recommends for local control. All support
-# the Ollama "tools" capability (required for the desktop agent) and are small
-# enough to run comfortably on a laptop.
+# the Ollama "tools" capability (required for the desktop agent). Notes reflect
+# measured reliability on Yuki's agent eval suite (graph_score, Tool RAG on):
+# qwen2.5:7b=0.90 (reliable), qwen2.5:3b=0.40, llama3.2:1b=0.10. Bigger = more
+# reliable for control; smaller = faster but better suited to chat/simple tasks.
 _RECOMMENDED_OLLAMA: list[dict[str, str]] = [
-    {"name": "qwen2.5:3b", "size": "~1.9 GB",
-     "note": "Best small pick — strong tool calling"},
-    {"name": "llama3.2:3b", "size": "~2.0 GB",
-     "note": "Well-rounded, tool-tuned"},
-    {"name": "llama3.2:1b", "size": "~1.3 GB",
-     "note": "Fastest; best for simple tasks"},
     {"name": "qwen2.5:7b", "size": "~4.7 GB",
-     "note": "Most capable if you have the RAM"},
+     "note": "Recommended — reliable Mac control (needs ~8GB RAM)"},
+    {"name": "qwen2.5:3b", "size": "~1.9 GB",
+     "note": "Lighter; OK for simple tasks, less reliable for control"},
+    {"name": "llama3.2:3b", "size": "~2.0 GB",
+     "note": "Well-rounded, tool-tuned; lighter than 7B"},
+    {"name": "llama3.2:1b", "size": "~1.3 GB",
+     "note": "Fastest; best for chat, not multi-step control"},
 ]
 
 

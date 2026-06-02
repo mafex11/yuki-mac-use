@@ -19,7 +19,9 @@ from yuki.providers.base import BaseChatLLM
 
 _DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-6",
-    "ollama": "qwen3-vl:8b",
+    # qwen2.5:7b is the validated local default: with Tool RAG it scores 0.90
+    # on the agent eval suite (reliable tool selection), fully on-device.
+    "ollama": "qwen2.5:7b",
     "google": "gemini-2.5-flash",
 }
 
