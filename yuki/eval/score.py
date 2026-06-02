@@ -50,7 +50,7 @@ def score_plan(case: EvalCase, emitted: list[dict[str, Any]]) -> ScoreResult:
     )
 
     expected_tools = sorted(s.tool for s in expected)
-    emitted_tools = sorted(str(e.get("tool")) for e in emitted)
+    emitted_tools = sorted(t for e in emitted if (t := e.get("tool")))
     toolset_ok = expected_tools == emitted_tools
 
     return {"graph_score": 1.0 if graph_ok else 0.0,

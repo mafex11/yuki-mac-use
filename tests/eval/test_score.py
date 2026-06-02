@@ -61,3 +61,12 @@ def test_reactive_grades_first_step_only() -> None:
 def test_empty_emitted_scores_zero() -> None:
     assert score_plan(_case(), [])["graph_score"] == 0.0
     assert score_plan(_case(), [])["toolset_score"] == 0.0
+
+
+def test_missing_tool_key_not_treated_as_tool() -> None:
+    # Expected single tool; emitted has the right tool + a junk step with no tool key.
+    case = EvalCase(task="x", expected_plan=[ExpectedStep("done_tool")])
+    emitted = [{"tool": "done_tool", "args": {}}, {"args": {}}]
+    r = score_plan(case, emitted)
+    # With the junk step dropped, toolset is exactly {done_tool} == expected.
+    assert r["toolset_score"] == 1.0
