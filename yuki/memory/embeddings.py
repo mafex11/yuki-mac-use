@@ -89,12 +89,45 @@ class OpenAIEmbedder:
         return [d.embedding for d in resp.data]
 
 
+class OllamaEmbedder:
+    """Local embeddings via Ollama. Works offline. Requires the embed model
+    pulled (default 'nomic-embed-text'). `client` is injectable for tests."""
+
+    def __init__(
+        self,
+        model: str = "nomic-embed-text",
+        dim: int = 768,
+        client: object | None = None,
+    ) -> None:
+        if client is None:
+            import ollama
+
+            client = ollama.Client()
+        self._client = client
+        self._model = model
+        self._dim = dim
+
+    @property
+    def dim(self) -> int:
+        return self._dim
+
+    def embed_one(self, text: str) -> list[float]:
+        resp = self._client.embeddings(model=self._model, prompt=text)
+        vec = resp["embedding"] if isinstance(resp, dict) else resp.embedding
+        return list(vec)
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return [self.embed_one(t) for t in texts]
+
+
 def get_embedder() -> Embedder:
     name = os.environ.get("YUKI_EMBEDDER", "voyage").lower()
     if name == "voyage":
         return VoyageEmbedder()
     if name == "openai":
         return OpenAIEmbedder()
+    if name == "ollama":
+        return OllamaEmbedder()
     if name == "stub":
         return StubEmbedder()
-    raise ValueError(f"Unknown embedder: {name!r}. Use voyage|openai|stub.")
+    raise ValueError(f"Unknown embedder: {name!r}. Use voyage|openai|ollama|stub.")
