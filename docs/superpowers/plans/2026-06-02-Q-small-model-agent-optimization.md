@@ -1309,6 +1309,16 @@ Proof Tool RAG is the lever (qwen2.5:7b, "open calculator"): with all 16 tools �
 
 **Phase A2 (planner/executor) is therefore NOT required** to ship a working local default — its purpose (simplify per-step decisions) is already achieved for the 7B by Tool RAG. A2 / Phase B fine-tuning remain optional future work to make the SMALLER (1-3B, faster) models clear the bar too. Recommended next step: make qwen2.5:7b the default/recommended local model + add per-task-type provider routing, rather than building A2.
 
+### ⮕ END-TO-END FINDING (live control runs, qwen2.5:7b, post-Tool-RAG + prompt fix)
+
+The eval harness scores tool *selection* (first tool). Live `agent.ainvoke("open calculator")` runs surfaced a *second* competency: task **termination** (emitting a valid `done_tool` to stop). Findings:
+
+- Tool selection: solved — the 7B reliably picks `app_tool` and Calculator opens.
+- Small models (incl. 7B) reliably OMIT the `thought` preamble field. Registry forgiveness synthesizes it when it's the only missing field (works); commit `af18f57` also strengthened the flash prompt to demand `thought` + prompt-to-finish.
+- **Termination is nondeterministic:** 5 identical "open calculator" runs → **3 clean completions (is_done, 1-2 steps), 2 failures (looped / dropped a required field).** Up from ~0/5 before the prompt fix, but not reliable.
+
+**Conclusion:** Prompt + Tool RAG get the local 7B *working but not consistent* (~60% task completion). The residual variance is a small-model reliability limit that prompt engineering can't fully close — it is exactly what **Phase B fine-tuning** eliminates (training on Yuki's exact tool/format makes emission consistent). So: qwen2.5:7b is a usable local default TODAY (Calculator opens, most tasks complete), and Phase B is the path to make it (and smaller models) *reliable*. The 7B default is shipped (commit `8461e2f`); Phase B remains the recommended follow-on.
+
 - [ ] **Step 5: Commit the recorded result**
 
 ```bash
