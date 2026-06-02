@@ -88,6 +88,7 @@ class Context:
         max_steps: int,
         desktop: Desktop,
         nudge: str = "",
+        verbosity: str = "full",
     ) -> HumanMessage | ImageMessage:
         desktop_state = desktop.get_state()
         content = self._build_state_prompt(
@@ -96,6 +97,7 @@ class Context:
             max_steps=max_steps,
             desktop=desktop,
             nudge=nudge,
+            verbosity=verbosity,
         )
         if desktop.use_vision and desktop_state.screenshot:
             return ImageMessage(images=[desktop_state.screenshot], content=content)
@@ -108,6 +110,7 @@ class Context:
         max_steps: int,
         desktop: Desktop,
         nudge: str = "",
+        verbosity: str = "full",
     ) -> str:
         desktop_state = desktop.desktop_state
         cursor_x, cursor_y = ax.GetCursorPos()
@@ -121,7 +124,7 @@ class Context:
             "windows": desktop_state.windows_to_string() if desktop_state else "No windows",
             "cursor_location": f"({cursor_x},{cursor_y})",
             "interactive_elements": (
-                desktop_state.tree_state.interactive_elements_to_string()
+                desktop_state.tree_state.interactive_elements_to_string(verbosity=verbosity)
                 if desktop.use_accessibility and desktop_state and desktop_state.tree_state
                 else "No accessibility data is available"
             ),

@@ -121,6 +121,13 @@ class Agent(BaseAgent):
         self._loop_guard = LoopGuard()
         self.disable_loop_detection = disable_loop_detection
 
+        # Optional Tool RAG selector. When set, `tools` returns a task-relevant
+        # subset instead of all tools (helps small models). Built by the caller
+        # (e.g. the control endpoint) for local models; None = all tools.
+        self.tool_selector = None
+        # AX-tree verbosity: "lean" for small/local models, "full" otherwise.
+        self.ax_verbosity = "full"
+
         self.event = Event()
         if event_subscriber is not None:
             self.event.add_subscriber(event_subscriber)
@@ -150,7 +157,15 @@ class Agent(BaseAgent):
 
     @property
     def tools(self):
-        return self.registry.get_tools()
+        all_tools = self.registry.get_tools()
+        selector = getattr(self, "tool_selector", None)
+        task = getattr(self.state, "task", "") or ""
+        if selector is None or not task:
+            return all_tools
+        return selector.select(task)
+
+    def _ax_verbosity(self) -> str:
+        return getattr(self, "ax_verbosity", "full")
 
     def loop(self) -> AgentResult:
         """Run the main agent loop synchronously."""
@@ -172,6 +187,7 @@ class Agent(BaseAgent):
                 max_steps=self.state.max_steps,
                 desktop=self.desktop,
                 nudge=nudge or "",
+                verbosity=self._ax_verbosity(),
             )
             _aw = (
                 self.desktop.desktop_state.active_window
@@ -404,6 +420,7 @@ class Agent(BaseAgent):
                 max_steps=self.state.max_steps,
                 desktop=self.desktop,
                 nudge=nudge or "",
+                verbosity=self._ax_verbosity(),
             )
             _aw = (
                 self.desktop.desktop_state.active_window
