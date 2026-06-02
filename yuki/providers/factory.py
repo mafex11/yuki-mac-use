@@ -126,6 +126,18 @@ def is_tool_call_unreliable(model: str) -> bool:
     return model in _UNRELIABLE_TOOL_MODELS
 
 
+def agent_mode_for(llm: object) -> str:
+    """Pick the desktop-agent prompt mode for an LLM.
+
+    Local models (Ollama) are typically small (1–8B) and follow instructions
+    far better with the lean "flash" prompt — the full 200-line "normal" prompt
+    overwhelms them (they collapse to degenerate output like an empty
+    done_tool). Cloud frontier models (Gemini/Claude) get the full prompt.
+    """
+    provider = getattr(llm, "provider", "") or ""
+    return "flash" if provider == "ollama" else "normal"
+
+
 def ollama_model_lacks_tools(model: str) -> bool:
     """True if a local Ollama model can't do tool calls (so control tasks
     would 400). Chat still works on these. Returns False if Ollama isn't

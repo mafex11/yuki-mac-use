@@ -206,8 +206,13 @@ async def _stream_control(
 
     from yuki.backend.event_bridge import QueueEventSubscriber, event_to_sse
 
+    from yuki.providers.factory import agent_mode_for
+
     queue: _asyncio.Queue = _asyncio.Queue()
-    agent = Agent(llm=llm, event_subscriber=QueueEventSubscriber(queue))
+    # Small local models follow the lean "flash" prompt far better than the
+    # full one (which overwhelms them into degenerate/empty tool calls).
+    agent = Agent(llm=llm, mode=agent_mode_for(llm),
+                  event_subscriber=QueueEventSubscriber(queue))
 
     foreground_bundle = ""
     try:
