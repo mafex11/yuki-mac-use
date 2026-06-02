@@ -73,3 +73,33 @@ async def test_ainvoke_also_terminates_on_done_tool() -> None:
 
     assert result.is_done is True
     assert result.content == "stub answer"
+
+
+def test_malformed_done_tool_is_not_premature_success() -> None:
+    """A done_tool missing its required `answer` must NOT terminate as a
+    success with empty content. It's a validation failure: the loop rejects
+    it and retries. (Regression: small models emitting a bare done_tool used
+    to exit with 0 steps / empty reply / outcome=success — doing nothing.)
+    """
+    malformed = LLMEvent(
+        type=LLMEventType.TOOL_CALL,
+        tool_call=ToolCall(
+            id="bad",
+            name="done_tool",
+            params={},  # missing required `answer` (and `thought`)
+        ),
+    )
+    # First call: malformed done (rejected). The stub's queue then empties,
+    # so the next call returns the default VALID done → legitimate finish.
+    stub = ChatStub(events=[malformed])
+    agent = _agent(stub)
+
+    result = agent.invoke(task="open calculator")
+
+    # It must have re-invoked the model (not accepted the malformed done).
+    assert len(stub.calls) >= 2
+    # And when it does finish, it carries the real answer — never the empty
+    # string the malformed call would have produced.
+    assert result.is_done is True
+    assert result.content == "stub answer"
+    assert result.content != ""
