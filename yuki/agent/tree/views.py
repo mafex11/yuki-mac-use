@@ -17,7 +17,11 @@ class TreeState:
     scrollable_nodes:list['ScrollElementNode']|None=field(default_factory=list)
     dom_informative_nodes:list['TextElementNode']|None=field(default_factory=list)
 
-    def interactive_elements_to_string(self) -> str:
+    def interactive_elements_to_string(
+        self,
+        verbosity: str = "full",
+        max_nodes: int = 25,
+    ) -> str:
         parts = []
         if not self.status:
             parts.append(WARNING_MESSAGE)
@@ -45,15 +49,32 @@ class TreeState:
                 "</focused_input>"
             )
 
+        lean = verbosity == "lean"
+        nodes = self.interactive_nodes
+        if lean:
+            priority = {
+                "url_bar": 0, "search_field": 1, "primary_input": 2,
+                "text_input": 3, "submit_button": 4,
+            }
+            nodes = sorted(
+                self.interactive_nodes,
+                key=lambda n: (not n.is_focused, priority.get(n.canonical or "", 9)),
+            )[:max_nodes]
+
         header = "# id|window|control_type|canonical|name|coords|focused|metadata"
         rows = [header]
-        for idx, node in enumerate(self.interactive_nodes):
+        for idx, node in enumerate(nodes):
             canonical = node.canonical or "-"
             focused_mark = "YES" if node.is_focused else "-"
+            if lean:
+                meta = {k: node.metadata[k] for k in ("value", "placeholder")
+                        if k in node.metadata}
+            else:
+                meta = node.metadata
             row = (
                 f"{idx}|{node.window_name}|{node.control_type}|{canonical}|"
                 f"{node.name}|{node.center.to_string()}|{focused_mark}|"
-                f"{json.dumps(node.metadata)}"
+                f"{json.dumps(meta)}"
             )
             rows.append(row)
         parts.append("\n".join(rows))
