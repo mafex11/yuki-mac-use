@@ -64,6 +64,24 @@ def _frame_user_task(message: str, hot_context: str) -> str:
     )
 
 
+def _configure_agent_for_model(agent, llm) -> None:
+    """Turn on Tool RAG + lean AX-tree for small/local (Ollama) models.
+    Cloud models keep full tools + full AX context (they handle it fine)."""
+    provider = getattr(llm, "provider", "") or ""
+    if provider != "ollama":
+        return
+    try:
+        from yuki.agent.toolrag import ToolSelector
+        from yuki.memory.embeddings import OllamaEmbedder
+
+        agent.tool_selector = ToolSelector(
+            agent.registry.get_tools(), embedder=OllamaEmbedder()
+        )
+    except Exception:
+        agent.tool_selector = None  # degrade to all-tools; never block
+    agent.ax_verbosity = "lean"
+
+
 async def _stream_chat(
     message: str, conversation_id: str | None
 ) -> AsyncIterator[dict[str, Any]]:
@@ -213,6 +231,7 @@ async def _stream_control(
     # full one (which overwhelms them into degenerate/empty tool calls).
     agent = Agent(llm=llm, mode=agent_mode_for(llm),
                   event_subscriber=QueueEventSubscriber(queue))
+    _configure_agent_for_model(agent, llm)
 
     foreground_bundle = ""
     try:
