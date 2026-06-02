@@ -24,6 +24,8 @@ _DEFAULTS: dict[str, Any] = {
     "hud_corner": "top-right",
     "hotkey": "cmd+shift+a",
     "launch_at_login": False,
+    "learner_enabled": True,
+    "ask_before_remember": True,
 }
 
 _KEYCHAIN_SERVICE = "com.yuki.app"

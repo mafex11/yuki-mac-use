@@ -25,6 +25,11 @@ final class UDSClient {
         try await sendBuffered(method: "GET", path: path, body: Data())
     }
 
+    /// Buffered DELETE returning the full response body as Data.
+    func deleteJSON(path: String) async throws -> Data {
+        try await sendBuffered(method: "DELETE", path: path, body: Data())
+    }
+
     private func sendBuffered(method: String, path: String, body: Data) async throws -> Data {
         try await withCheckedThrowingContinuation { cont in
             let conn = makeConnection()

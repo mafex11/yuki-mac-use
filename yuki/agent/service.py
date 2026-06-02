@@ -348,7 +348,14 @@ class Agent(BaseAgent):
             else:
                 consecutive_failures = 0
 
-            if tool_name == "done_tool":
+            # Only treat done_tool as terminal when it actually VALIDATED.
+            # A malformed done (e.g. small models dropping the required
+            # `answer`/`thought` fields) must NOT count as success — otherwise
+            # the agent exits with 0 steps and an empty reply having done
+            # nothing. A failed done was already recorded as a tool failure
+            # above (its validation error is fed back), so the loop retries and
+            # the model is pushed to either act or emit a valid done.
+            if tool_name == "done_tool" and tool_result.is_success:
                 content = tool_params.get("answer", "")
                 self.event.emit(
                     AgentEvent(type=EventType.DONE, data={"step": step, "content": content})
@@ -570,7 +577,14 @@ class Agent(BaseAgent):
             else:
                 consecutive_failures = 0
 
-            if tool_name == "done_tool":
+            # Only treat done_tool as terminal when it actually VALIDATED.
+            # A malformed done (e.g. small models dropping the required
+            # `answer`/`thought` fields) must NOT count as success — otherwise
+            # the agent exits with 0 steps and an empty reply having done
+            # nothing. A failed done was already recorded as a tool failure
+            # above (its validation error is fed back), so the loop retries and
+            # the model is pushed to either act or emit a valid done.
+            if tool_name == "done_tool" and tool_result.is_success:
                 content = tool_params.get("answer", "")
                 self.event.emit(
                     AgentEvent(type=EventType.DONE, data={"step": step, "content": content})

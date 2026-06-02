@@ -10,7 +10,7 @@ enum SettingsWindow {
     static func show() {
         if window == nil {
             let w = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 480, height: 420),
+                contentRect: NSRect(x: 0, y: 0, width: 620, height: 460),
                 styleMask: [.titled, .closable],
                 backing: .buffered, defer: false)
             w.title = "Yuki Settings"
@@ -30,9 +30,10 @@ struct SettingsView: View {
             GeneralSettings().tabItem { Label("General", systemImage: "gear") }
             ProviderSettings().tabItem { Label("Provider", systemImage: "brain") }
             PermissionsSettings().tabItem { Label("Permissions", systemImage: "lock") }
+            MemorySettings().tabItem { Label("Memory", systemImage: "brain.head.profile") }
             AboutSettings().tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 480, height: 420)
+        .frame(width: 620, height: 460)
         .padding()
     }
 }
@@ -70,9 +71,20 @@ struct GeneralSettings: View {
 struct ProviderSettings: View {
     @State private var provider = "google"
     @State private var apiKey = ""
+    @State private var keyAlreadySaved = false
     @State private var testResult = ""
     @State private var testing = false
+    @State private var saving = false
     @State private var loaded = false
+
+    // Ollama model selection
+    @State private var ollamaModels: [Backend.OllamaModel] = []
+    @State private var ollamaRecommended: [Backend.RecommendedModel] = []
+    @State private var ollamaModel = ""
+    @State private var ollamaRunning = true
+    @State private var pulling = ""        // model currently downloading
+    @State private var pullPercent = 0
+    @State private var pullStatus = ""
 
     var body: some View {
         Form {
@@ -81,41 +93,190 @@ struct ProviderSettings: View {
                 Text("Anthropic Claude").tag("anthropic")
                 Text("Local (Ollama)").tag("ollama")
             }
-            if provider != "ollama" {
-                SecureField("API key (leave blank to keep existing)", text: $apiKey)
+            .onChange(of: provider) { _ in
+                guard loaded else { return }
+                reloadForProvider()
             }
+
+            if provider == "ollama" {
+                ollamaSection
+            } else {
+                SecureField(keyAlreadySaved
+                            ? "API key (saved — leave blank to keep)"
+                            : "API key", text: $apiKey)
+                if keyAlreadySaved && apiKey.isEmpty {
+                    Label("Key saved for \(provider)", systemImage: "checkmark.seal.fill")
+                        .font(.caption).foregroundStyle(.green)
+                }
+            }
+
             HStack {
-                Button("Save") { save() }
+                Button(saving ? "Saving…" : "Save") { save() }.disabled(saving)
                 Button(testing ? "Testing…" : "Test") { test() }.disabled(testing)
-                Text(testResult).font(.caption)
+                Text(testResult)
+                    .font(.caption)
+                    .foregroundStyle(testResult.hasPrefix("✓") ? .green
+                                     : testResult.hasPrefix("✗") ? .red : .secondary)
             }
         }
         .padding()
         .onAppear {
-            // Reflect the provider the backend actually uses, not a local
-            // default — so Settings agrees with first-run + app_state.json.
+            // Reflect the provider/model the backend actually uses, not a
+            // local default — so Settings agrees with app_state.json.
             guard !loaded else { return }
             loaded = true
-            Task { provider = await Backend.shared.currentProvider() }
+            Task {
+                provider = await Backend.shared.currentProvider()
+                reloadForProvider()
+            }
         }
     }
 
-    private func save() {
-        if provider != "ollama" && !apiKey.isEmpty {
-            Keychain.set(apiKey, account: provider)
+    @ViewBuilder private var ollamaSection: some View {
+        if ollamaRunning && !ollamaModels.isEmpty {
+            Picker("Model", selection: $ollamaModel) {
+                ForEach(ollamaModels) { m in
+                    Text(m.tools ? m.name : "\(m.name) — chat only").tag(m.name)
+                }
+            }
+            .onChange(of: ollamaModel) { m in
+                guard loaded, !m.isEmpty else { return }
+                Task { await Backend.shared.saveProvider("ollama", model: m) }
+            }
+            // Warn if the selected model can't do control tasks.
+            if let sel = ollamaModels.first(where: { $0.name == ollamaModel }),
+               !sel.tools {
+                Label("This model can chat but can't control your Mac (no tool support).",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+        } else {
+            Label("Ollama not reachable — start it, then reopen Settings",
+                  systemImage: "exclamationmark.triangle")
+                .font(.caption).foregroundStyle(.secondary)
+            TextField("Model name (e.g. qwen2.5:3b)", text: $ollamaModel)
+                .textFieldStyle(.roundedBorder)
         }
+
+        if ollamaRunning { downloadSection }
+    }
+
+    @ViewBuilder private var downloadSection: some View {
+        Divider()
+        Text("Download a Yuki-ready model").font(.caption.bold())
+            .foregroundStyle(.secondary)
+        if !pulling.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Downloading \(pulling)… \(pullPercent)%").font(.caption)
+                ProgressView(value: Double(pullPercent), total: 100)
+                if !pullStatus.isEmpty {
+                    Text(pullStatus).font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+        } else {
+            ForEach(ollamaRecommended) { rec in
+                HStack {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(rec.name).font(.callout)
+                        Text("\(rec.size) · \(rec.note)")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if ollamaModels.contains(where: { $0.name == rec.name }) {
+                        Label("Installed", systemImage: "checkmark.circle.fill")
+                            .font(.caption2).foregroundStyle(.green)
+                    } else {
+                        Button("Download") { pull(rec.name) }
+                            .controlSize(.small)
+                    }
+                }
+            }
+        }
+    }
+
+    private func pull(_ model: String) {
+        pulling = model
+        pullPercent = 0
+        pullStatus = ""
         Task {
-            await Backend.shared.saveProvider(provider)
-            await Backend.shared.pushKey(for: provider)
+            let ok = await Backend.shared.pullModel(model) { pct, status in
+                pullPercent = pct
+                pullStatus = status
+            }
+            pulling = ""
+            if ok {
+                // Refresh installed list; auto-select the freshly pulled model.
+                let r = await Backend.shared.ollamaModels()
+                ollamaModels = r.models
+                ollamaModel = model
+                await Backend.shared.saveProvider("ollama", model: model)
+                testResult = "✓ \(model) ready"
+            } else {
+                testResult = "✗ Download failed"
+            }
+        }
+    }
+
+    /// Refresh the key indicator + Ollama models for the selected provider.
+    private func reloadForProvider() {
+        apiKey = ""
+        testResult = ""
+        if provider == "ollama" {
+            keyAlreadySaved = false
+            Task {
+                let r = await Backend.shared.ollamaModels()
+                ollamaRunning = r.running
+                ollamaModels = r.models
+                ollamaRecommended = r.recommended
+                let saved = await Backend.shared.currentModel()
+                let names = r.models.map { $0.name }
+                // Prefer the saved model if it's installed; else first available.
+                if names.contains(saved) { ollamaModel = saved }
+                else if let first = names.first { ollamaModel = first }
+                else { ollamaModel = saved }
+            }
+        } else {
+            keyAlreadySaved = !Backend.shared.savedKey(for: provider).isEmpty
+        }
+    }
+
+    /// Persist the current selection. Returns when the write has landed so
+    /// callers (Save button, Test) can sequence on it.
+    @discardableResult
+    private func persist() async -> Bool {
+        if provider == "ollama" {
+            let m = ollamaModel.trimmingCharacters(in: .whitespaces)
+            await Backend.shared.saveProvider("ollama", model: m.isEmpty ? nil : m)
+            return true
+        }
+        if !apiKey.isEmpty {
+            Keychain.set(apiKey, account: provider)
+            keyAlreadySaved = true
+            apiKey = ""
+        }
+        await Backend.shared.saveProvider(provider)
+        await Backend.shared.pushKey(for: provider)
+        return true
+    }
+
+    private func save() {
+        saving = true
+        testResult = ""
+        Task {
+            await persist()
+            saving = false
+            testResult = "✓ Saved"
+            // Clear the confirmation after a moment so it doesn't linger.
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            if testResult == "✓ Saved" { testResult = "" }
         }
     }
 
     private func test() {
         testing = true
-        save()
+        testResult = ""
         Task {
-            // Give saveProvider + pushKey a beat to land before testing.
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            await persist()
             let ok = await Backend.shared.testConnection()
             testResult = ok ? "✓ Connected" : "✗ Failed"
             testing = false
@@ -155,5 +316,119 @@ struct AboutSettings: View {
                 "https://github.com/mafex11/yuki-mac-use")!)
         }
         .padding()
+    }
+}
+
+struct MemorySettings: View {
+    @State private var facts: [Backend.Fact] = []
+    @State private var newFact = ""
+    @State private var learner = true
+    @State private var ask = true
+    @State private var loaded = false
+    @State private var didLoad = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("What Yuki knows about you").font(.headline)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(facts) { fact in
+                        FactRow(fact: fact) {
+                            Task {
+                                await Backend.shared.forgetFact(id: fact.id)
+                                await reload()
+                            }
+                        }
+                        Divider()
+                    }
+                    if facts.isEmpty {
+                        Text("Nothing yet. Add a fact below, or just tell Yuki about yourself in chat.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .frame(maxHeight: 200)
+
+            HStack {
+                TextField("Add a fact (e.g. I use Linear for tickets)", text: $newFact)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { addFact() }
+                Button("Add") { addFact() }
+                    .disabled(newFact.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+
+            Divider()
+            Toggle("Daily learning (distill tasks into reusable notes)", isOn: $learner)
+                .onChange(of: learner) { on in
+                    guard didLoad else { return }
+                    Task {
+                        await Backend.shared.setMemorySettings(learner: on)
+                        LaunchAgentManager.reconcile(enabled: on)
+                    }
+                }
+            Toggle("Ask before remembering things from chat", isOn: $ask)
+                .onChange(of: ask) { on in
+                    guard didLoad else { return }
+                    Task { await Backend.shared.setMemorySettings(ask: on) }
+                }
+        }
+        .padding()
+        .onAppear {
+            guard !loaded else { return }
+            loaded = true
+            Task {
+                let s = await Backend.shared.memorySettings()
+                learner = s.learner
+                ask = s.ask
+                didLoad = true
+                await reload()
+            }
+        }
+    }
+
+    private func addFact() {
+        let text = newFact.trimmingCharacters(in: .whitespaces)
+        guard !text.isEmpty else { return }
+        newFact = ""
+        Task {
+            await Backend.shared.addFact(text)
+            await reload()
+        }
+    }
+
+    private func reload() async { facts = await Backend.shared.facts() }
+}
+
+/// One fact row: section chip + text truncated to 4 lines with a Show
+/// more/less toggle, plus a delete button.
+struct FactRow: View {
+    let fact: Backend.Fact
+    let onDelete: () -> Void
+    @State private var expanded = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(fact.section.uppercased())
+                .font(.caption2).foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(fact.text)
+                    .font(.callout)
+                    .lineLimit(expanded ? nil : 4)
+                    .textSelection(.enabled)
+                // Only offer expand when the text is long enough to be clipped.
+                if fact.text.count > 200 {
+                    Button(expanded ? "Show less" : "Show more") { expanded.toggle() }
+                        .font(.caption2)
+                        .buttonStyle(.borderless)
+                }
+            }
+            Spacer()
+            Button(role: .destructive, action: onDelete) {
+                Image(systemName: "minus.circle")
+            }
+            .buttonStyle(.borderless)
+        }
     }
 }

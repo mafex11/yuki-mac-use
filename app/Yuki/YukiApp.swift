@@ -35,6 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // binary the Keychain ACL trusts, so reading here is silent.
                 let provider = await Backend.shared.currentProvider()
                 await Backend.shared.pushKey(for: provider)
+                // Reconcile the daily-learner LaunchAgent with the saved toggle
+                // so it stays installed/removed across launches.
+                let memSettings = await Backend.shared.memorySettings()
+                LaunchAgentManager.reconcile(enabled: memSettings.learner)
                 FirstRun.runIfNeeded()
             } catch {
                 NSLog("Yuki backend failed to start: \(error)")

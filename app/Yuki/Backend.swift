@@ -21,9 +21,10 @@ final class Backend {
 
     // MARK: - chat (collects the single final 'done')
 
-    func chat(_ msg: String) async -> (reply: String, badge: String) {
+    func chat(_ msg: String) async -> (reply: String, badge: String, capture: String?) {
         var reply = ""
         var badge = ""
+        var capture: String? = nil
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             guard let body = try? JSONSerialization.data(
                     withJSONObject: ["message": msg]) else {
@@ -37,12 +38,13 @@ final class Backend {
                 if type == "done" {
                     reply = o["content"] as? String ?? ""
                     badge = o["ctx_badge"] as? String ?? ""
+                    capture = o["capture_suggestion"] as? String
                 } else if type == "error" {
                     reply = "[error] " + (o["content"] as? String ?? "")
                 }
             }, onDone: { cont.resume() })
         }
-        return (reply, badge)
+        return (reply, badge, capture)
     }
 
     // MARK: - control (forwards every event to the HUD)
@@ -124,6 +126,88 @@ final class Backend {
         return (o["provider"] as? String) ?? "google"
     }
 
+    /// The model the backend is configured to use (from app_state.json), so
+    /// the Ollama picker can highlight the active model.
+    func currentModel() async -> String {
+        guard let data = try? await client.getJSON(path: "/settings/provider"),
+              let o = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any]
+        else { return "" }
+        return (o["model"] as? String) ?? ""
+    }
+
+    /// Read the saved api key straight from the Keychain (the app is the
+    /// trusted binary). Used to prepopulate the Settings field so the user
+    /// sees their key is stored.
+    func savedKey(for provider: String) -> String {
+        guard provider == "google" || provider == "anthropic" else { return "" }
+        return Keychain.get(account: provider) ?? ""
+    }
+
+    struct OllamaModel: Identifiable {
+        var id: String { name }
+        let name: String
+        let tools: Bool   // can do control tasks
+    }
+    struct RecommendedModel: Identifiable {
+        var id: String { name }
+        let name: String
+        let size: String
+        let note: String
+    }
+
+    /// Installed local Ollama models + tool-capability + recommendations.
+    /// `running` is false when Ollama isn't reachable (UI falls back to manual).
+    func ollamaModels() async -> (running: Bool,
+                                  models: [OllamaModel],
+                                  recommended: [RecommendedModel]) {
+        guard let data = try? await client.getJSON(
+                path: "/settings/provider/ollama/models"),
+              let o = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any]
+        else { return (false, [], []) }
+        let running = o["running"] as? Bool ?? false
+        let models: [OllamaModel] = (o["models"] as? [[String: Any]] ?? [])
+            .compactMap { d in
+                guard let name = d["name"] as? String else { return nil }
+                return OllamaModel(name: name, tools: d["tools"] as? Bool ?? false)
+            }
+        let recommended: [RecommendedModel] = (o["recommended"] as? [[String: Any]] ?? [])
+            .compactMap { d in
+                guard let name = d["name"] as? String else { return nil }
+                return RecommendedModel(name: name,
+                                        size: d["size"] as? String ?? "",
+                                        note: d["note"] as? String ?? "")
+            }
+        return (running, models, recommended)
+    }
+
+    /// Pull an Ollama model, streaming progress. onProgress gets (percent,
+    /// status); resolves true on success, false on error.
+    func pullModel(_ model: String,
+                   onProgress: @escaping (Int, String) -> Void) async -> Bool {
+        var ok = false
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            guard let body = try? JSONSerialization.data(
+                    withJSONObject: ["model": model]) else { cont.resume(); return }
+            client.streamSSE(path: "/settings/provider/ollama/pull", body: body,
+                             onEvent: { line in
+                guard let d = line.data(using: .utf8),
+                      let o = try? JSONSerialization.jsonObject(with: d)
+                        as? [String: Any] else { return }
+                switch o["type"] as? String {
+                case "progress":
+                    let pct = o["percent"] as? Int ?? 0
+                    let status = o["status"] as? String ?? ""
+                    Task { @MainActor in onProgress(pct, status) }
+                case "done": ok = true
+                default: break
+                }
+            }, onDone: { cont.resume() })
+        }
+        return ok
+    }
+
     func saveProvider(_ provider: String, model: String? = nil) async {
         var payload: [String: Any] = ["provider": provider]
         if let model = model { payload["model"] = model }
@@ -152,5 +236,77 @@ final class Backend {
                 as? [String: Any]
         else { return false }
         return (o["ok"] as? Bool) ?? false
+    }
+
+    // MARK: - memory facts
+
+    struct Fact: Identifiable {
+        let id: String
+        let section: String
+        let title: String
+        let text: String
+    }
+
+    func facts() async -> [Fact] {
+        guard let data = try? await client.getJSON(path: "/facts"),
+              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let arr = o["facts"] as? [[String: Any]] else { return [] }
+        return arr.compactMap { d in
+            guard let id = d["id"] as? String else { return nil }
+            return Fact(id: id,
+                        section: d["section"] as? String ?? "",
+                        title: d["title"] as? String ?? "",
+                        text: d["text"] as? String ?? "")
+        }
+    }
+
+    @discardableResult
+    func addFact(_ text: String) async -> Bool {
+        guard let body = try? JSONSerialization.data(withJSONObject: ["text": text])
+        else { return false }
+        return (try? await client.postJSON(path: "/facts", body: body)) != nil
+    }
+
+    @discardableResult
+    func forgetFact(id: String) async -> Bool {
+        return (try? await client.deleteJSON(path: "/facts/\(id)")) != nil
+    }
+
+    func memorySettings() async -> (learner: Bool, ask: Bool) {
+        guard let data = try? await client.getJSON(path: "/facts/settings"),
+              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return (true, true) }
+        return (o["learner_enabled"] as? Bool ?? true,
+                o["ask_before_remember"] as? Bool ?? true)
+    }
+
+    func setMemorySettings(learner: Bool? = nil, ask: Bool? = nil) async {
+        var payload: [String: Any] = [:]
+        if let learner = learner { payload["learner_enabled"] = learner }
+        if let ask = ask { payload["ask_before_remember"] = ask }
+        guard let body = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        _ = try? await client.postJSON(path: "/facts/settings", body: body)
+    }
+
+    // MARK: - control streamed into the command bar
+
+    /// Run a control task, forwarding every SSE event to `onEvent` (for the
+    /// bar's inline activity) while the HUD also reflects status. Resolves
+    /// when the task completes.
+    func runControlInBar(_ msg: String,
+                         onEvent: @escaping ([String: Any]) -> Void) async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            guard let body = try? JSONSerialization.data(
+                    withJSONObject: ["message": msg]) else { cont.resume(); return }
+            client.streamSSE(path: "/chat/control", body: body, onEvent: { line in
+                guard let d = line.data(using: .utf8),
+                      let o = try? JSONSerialization.jsonObject(with: d)
+                        as? [String: Any] else { return }
+                Task { @MainActor in
+                    HUD.shared.handle(event: o)
+                    onEvent(o)
+                }
+            }, onDone: { cont.resume() })
+        }
     }
 }
