@@ -1,0 +1,4 @@
+# id|window|control_type|canonical|name|coords|focused|metadata
+0|Form|AXButton|submit_button|Submit|(420,560)|-|{}
+1|Form|AXButton|cancel_button|Cancel|(300,560)|-|{}
+2|Form|AXTextField|text_input|Email|(360,400)|-|{"value":""}

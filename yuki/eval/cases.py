@@ -8,6 +8,7 @@ steps can be graded deterministically (no live Mac).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from importlib.resources import files
 
 
 @dataclass(frozen=True)
@@ -94,3 +95,11 @@ CASES: list[EvalCase] = [
         ax_fixture="submit_button.txt",
     ),
 ]
+
+
+def load_fixture(name: str) -> str:
+    """Read a canned AX-tree fixture from yuki/eval/fixtures/."""
+    path = files("yuki.eval").joinpath("fixtures", name)
+    if not path.is_file():
+        raise FileNotFoundError(f"eval fixture not found: {name}")
+    return path.read_text(encoding="utf-8")

@@ -26,3 +26,17 @@ def test_tool_names_are_real() -> None:
     for c in CASES:
         for step in c.expected_plan:
             assert step.tool in valid, f"{c.task}: unknown tool {step.tool}"
+
+
+def test_load_fixture_returns_text() -> None:
+    from yuki.eval.cases import load_fixture
+    text = load_fixture("submit_button.txt")
+    assert "submit" in text.lower()
+    assert "|" in text  # pipe-delimited node rows
+
+
+def test_missing_fixture_raises() -> None:
+    import pytest
+    from yuki.eval.cases import load_fixture
+    with pytest.raises(FileNotFoundError):
+        load_fixture("does_not_exist.txt")
