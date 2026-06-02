@@ -78,9 +78,13 @@ struct ProviderSettings: View {
     @State private var loaded = false
 
     // Ollama model selection
-    @State private var ollamaModels: [String] = []
+    @State private var ollamaModels: [Backend.OllamaModel] = []
+    @State private var ollamaRecommended: [Backend.RecommendedModel] = []
     @State private var ollamaModel = ""
     @State private var ollamaRunning = true
+    @State private var pulling = ""        // model currently downloading
+    @State private var pullPercent = 0
+    @State private var pullStatus = ""
 
     var body: some View {
         Form {
@@ -131,18 +135,85 @@ struct ProviderSettings: View {
     @ViewBuilder private var ollamaSection: some View {
         if ollamaRunning && !ollamaModels.isEmpty {
             Picker("Model", selection: $ollamaModel) {
-                ForEach(ollamaModels, id: \.self) { m in Text(m).tag(m) }
+                ForEach(ollamaModels) { m in
+                    Text(m.tools ? m.name : "\(m.name) — chat only").tag(m.name)
+                }
             }
             .onChange(of: ollamaModel) { m in
                 guard loaded, !m.isEmpty else { return }
                 Task { await Backend.shared.saveProvider("ollama", model: m) }
             }
+            // Warn if the selected model can't do control tasks.
+            if let sel = ollamaModels.first(where: { $0.name == ollamaModel }),
+               !sel.tools {
+                Label("This model can chat but can't control your Mac (no tool support).",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
         } else {
             Label("Ollama not reachable — start it, then reopen Settings",
                   systemImage: "exclamationmark.triangle")
                 .font(.caption).foregroundStyle(.secondary)
-            TextField("Model name (e.g. qwen3-vl:8b)", text: $ollamaModel)
+            TextField("Model name (e.g. qwen2.5:3b)", text: $ollamaModel)
                 .textFieldStyle(.roundedBorder)
+        }
+
+        if ollamaRunning { downloadSection }
+    }
+
+    @ViewBuilder private var downloadSection: some View {
+        Divider()
+        Text("Download a Yuki-ready model").font(.caption.bold())
+            .foregroundStyle(.secondary)
+        if !pulling.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Downloading \(pulling)… \(pullPercent)%").font(.caption)
+                ProgressView(value: Double(pullPercent), total: 100)
+                if !pullStatus.isEmpty {
+                    Text(pullStatus).font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
+        } else {
+            ForEach(ollamaRecommended) { rec in
+                HStack {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(rec.name).font(.callout)
+                        Text("\(rec.size) · \(rec.note)")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if ollamaModels.contains(where: { $0.name == rec.name }) {
+                        Label("Installed", systemImage: "checkmark.circle.fill")
+                            .font(.caption2).foregroundStyle(.green)
+                    } else {
+                        Button("Download") { pull(rec.name) }
+                            .controlSize(.small)
+                    }
+                }
+            }
+        }
+    }
+
+    private func pull(_ model: String) {
+        pulling = model
+        pullPercent = 0
+        pullStatus = ""
+        Task {
+            let ok = await Backend.shared.pullModel(model) { pct, status in
+                pullPercent = pct
+                pullStatus = status
+            }
+            pulling = ""
+            if ok {
+                // Refresh installed list; auto-select the freshly pulled model.
+                let r = await Backend.shared.ollamaModels()
+                ollamaModels = r.models
+                ollamaModel = model
+                await Backend.shared.saveProvider("ollama", model: model)
+                testResult = "✓ \(model) ready"
+            } else {
+                testResult = "✗ Download failed"
+            }
         }
     }
 
@@ -156,10 +227,12 @@ struct ProviderSettings: View {
                 let r = await Backend.shared.ollamaModels()
                 ollamaRunning = r.running
                 ollamaModels = r.models
+                ollamaRecommended = r.recommended
                 let saved = await Backend.shared.currentModel()
+                let names = r.models.map { $0.name }
                 // Prefer the saved model if it's installed; else first available.
-                if r.models.contains(saved) { ollamaModel = saved }
-                else if let first = r.models.first { ollamaModel = first }
+                if names.contains(saved) { ollamaModel = saved }
+                else if let first = names.first { ollamaModel = first }
                 else { ollamaModel = saved }
             }
         } else {

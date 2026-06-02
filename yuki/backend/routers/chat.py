@@ -183,6 +183,25 @@ async def _stream_control(
         yield {"type": "error", "content": str(e)}
         llm = ChatStub()  # type: ignore[assignment]
 
+    # Control tasks need a tool-capable model. Many local models (gemma3,
+    # deepseek-r1, …) chat fine but can't call tools — Ollama 400s after the
+    # agent burns retries. Catch it upfront with a clear, actionable message.
+    if getattr(llm, "provider", "") == "ollama":
+        from yuki.providers.factory import ollama_model_lacks_tools
+
+        model_name = getattr(llm, "model_name", "") or ""
+        if ollama_model_lacks_tools(model_name):
+            yield {
+                "type": "error",
+                "content": (
+                    f"{model_name} can't control your Mac — it doesn't support "
+                    "tool calling. It works for chat, but for tasks switch to a "
+                    "tool-capable model (e.g. qwen2.5:3b or llama3.2:3b) in "
+                    "Settings → Provider."
+                ),
+            }
+            return
+
     import asyncio as _asyncio
 
     from yuki.backend.event_bridge import QueueEventSubscriber, event_to_sse

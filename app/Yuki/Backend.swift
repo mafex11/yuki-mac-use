@@ -144,17 +144,68 @@ final class Backend {
         return Keychain.get(account: provider) ?? ""
     }
 
-    /// Installed local Ollama models (`ollama list`). `running` is false when
-    /// Ollama isn't reachable, so the UI can fall back to manual entry.
-    func ollamaModels() async -> (running: Bool, models: [String]) {
+    struct OllamaModel: Identifiable {
+        var id: String { name }
+        let name: String
+        let tools: Bool   // can do control tasks
+    }
+    struct RecommendedModel: Identifiable {
+        var id: String { name }
+        let name: String
+        let size: String
+        let note: String
+    }
+
+    /// Installed local Ollama models + tool-capability + recommendations.
+    /// `running` is false when Ollama isn't reachable (UI falls back to manual).
+    func ollamaModels() async -> (running: Bool,
+                                  models: [OllamaModel],
+                                  recommended: [RecommendedModel]) {
         guard let data = try? await client.getJSON(
                 path: "/settings/provider/ollama/models"),
               let o = try? JSONSerialization.jsonObject(with: data)
                 as? [String: Any]
-        else { return (false, []) }
+        else { return (false, [], []) }
         let running = o["running"] as? Bool ?? false
-        let models = o["models"] as? [String] ?? []
-        return (running, models)
+        let models: [OllamaModel] = (o["models"] as? [[String: Any]] ?? [])
+            .compactMap { d in
+                guard let name = d["name"] as? String else { return nil }
+                return OllamaModel(name: name, tools: d["tools"] as? Bool ?? false)
+            }
+        let recommended: [RecommendedModel] = (o["recommended"] as? [[String: Any]] ?? [])
+            .compactMap { d in
+                guard let name = d["name"] as? String else { return nil }
+                return RecommendedModel(name: name,
+                                        size: d["size"] as? String ?? "",
+                                        note: d["note"] as? String ?? "")
+            }
+        return (running, models, recommended)
+    }
+
+    /// Pull an Ollama model, streaming progress. onProgress gets (percent,
+    /// status); resolves true on success, false on error.
+    func pullModel(_ model: String,
+                   onProgress: @escaping (Int, String) -> Void) async -> Bool {
+        var ok = false
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            guard let body = try? JSONSerialization.data(
+                    withJSONObject: ["model": model]) else { cont.resume(); return }
+            client.streamSSE(path: "/settings/provider/ollama/pull", body: body,
+                             onEvent: { line in
+                guard let d = line.data(using: .utf8),
+                      let o = try? JSONSerialization.jsonObject(with: d)
+                        as? [String: Any] else { return }
+                switch o["type"] as? String {
+                case "progress":
+                    let pct = o["percent"] as? Int ?? 0
+                    let status = o["status"] as? String ?? ""
+                    Task { @MainActor in onProgress(pct, status) }
+                case "done": ok = true
+                default: break
+                }
+            }, onDone: { cont.resume() })
+        }
+        return ok
     }
 
     func saveProvider(_ provider: String, model: String? = nil) async {

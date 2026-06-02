@@ -124,3 +124,20 @@ def make_llm(
 def is_tool_call_unreliable(model: str) -> bool:
     """Models known to chat fine but flake on tool calls."""
     return model in _UNRELIABLE_TOOL_MODELS
+
+
+def ollama_model_lacks_tools(model: str) -> bool:
+    """True if a local Ollama model can't do tool calls (so control tasks
+    would 400). Chat still works on these. Returns False if Ollama isn't
+    reachable or the capability can't be determined (don't block optimistically).
+    """
+    try:
+        import ollama
+
+        info = ollama.Client().show(model)
+        caps = getattr(info, "capabilities", None)
+        if caps is None and isinstance(info, dict):
+            caps = info.get("capabilities")
+        return "tools" not in (caps or [])
+    except Exception:
+        return False
