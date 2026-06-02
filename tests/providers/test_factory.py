@@ -43,7 +43,8 @@ def test_anthropic_with_key_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_env_override_to_ollama() -> None:
     llm = make_llm(provider="ollama")
     assert llm.provider == "ollama"
-    assert llm.model_name == "qwen3-vl:8b"
+    # Default Ollama model — qwen2.5:7b (validated 0.90 on the agent eval suite).
+    assert llm.model_name == "qwen2.5:7b"
 
 
 def test_env_override_to_ollama_with_model() -> None:
