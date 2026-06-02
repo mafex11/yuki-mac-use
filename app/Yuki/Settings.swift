@@ -74,6 +74,7 @@ struct ProviderSettings: View {
     @State private var keyAlreadySaved = false
     @State private var testResult = ""
     @State private var testing = false
+    @State private var saving = false
     @State private var loaded = false
 
     // Ollama model selection
@@ -106,9 +107,12 @@ struct ProviderSettings: View {
             }
 
             HStack {
-                Button("Save") { save() }
+                Button(saving ? "Saving…" : "Save") { save() }.disabled(saving)
                 Button(testing ? "Testing…" : "Test") { test() }.disabled(testing)
-                Text(testResult).font(.caption)
+                Text(testResult)
+                    .font(.caption)
+                    .foregroundStyle(testResult.hasPrefix("✓") ? .green
+                                     : testResult.hasPrefix("✗") ? .red : .secondary)
             }
         }
         .padding()
@@ -163,29 +167,43 @@ struct ProviderSettings: View {
         }
     }
 
-    private func save() {
+    /// Persist the current selection. Returns when the write has landed so
+    /// callers (Save button, Test) can sequence on it.
+    @discardableResult
+    private func persist() async -> Bool {
         if provider == "ollama" {
             let m = ollamaModel.trimmingCharacters(in: .whitespaces)
-            Task { await Backend.shared.saveProvider("ollama", model: m.isEmpty ? nil : m) }
-            return
+            await Backend.shared.saveProvider("ollama", model: m.isEmpty ? nil : m)
+            return true
         }
         if !apiKey.isEmpty {
             Keychain.set(apiKey, account: provider)
             keyAlreadySaved = true
             apiKey = ""
         }
+        await Backend.shared.saveProvider(provider)
+        await Backend.shared.pushKey(for: provider)
+        return true
+    }
+
+    private func save() {
+        saving = true
+        testResult = ""
         Task {
-            await Backend.shared.saveProvider(provider)
-            await Backend.shared.pushKey(for: provider)
+            await persist()
+            saving = false
+            testResult = "✓ Saved"
+            // Clear the confirmation after a moment so it doesn't linger.
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            if testResult == "✓ Saved" { testResult = "" }
         }
     }
 
     private func test() {
         testing = true
-        save()
+        testResult = ""
         Task {
-            // Give saveProvider + pushKey a beat to land before testing.
-            try? await Task.sleep(nanoseconds: 200_000_000)
+            await persist()
             let ok = await Backend.shared.testConnection()
             testResult = ok ? "✓ Connected" : "✗ Failed"
             testing = false
