@@ -32,7 +32,13 @@ DEFAULTS = {
     "batch_size": 1,       # keep working set in RAM (16GB ceiling)
     "num_layers": 8,       # LoRA on the top N layers (cheaper, usually enough)
     "learning_rate": 1e-4,
-    "max_seq_length": 1024,
+    # Native tool-call rows render the FULL JSON schema of every present tool,
+    # so they run ~2200-2950 tokens (vs the old one-line dialect's ~300). This
+    # MUST exceed the longest row — otherwise --mask-prompt truncates the
+    # assistant target away, leaving 0 trained tokens and a `nan` loss every
+    # iter (the failure mode that produced the first dead 1b). Peak mem at this
+    # length is ~6-8GB on a 1B (was 3.6GB at 1024), fine for 16GB.
+    "max_seq_length": 3072,
 }
 
 
@@ -49,6 +55,8 @@ def main() -> None:
     ap.add_argument("--num-layers", type=int, default=DEFAULTS["num_layers"])
     ap.add_argument("--learning-rate", type=float, default=DEFAULTS["learning_rate"])
     ap.add_argument("--max-seq-length", type=int, default=DEFAULTS["max_seq_length"])
+    ap.add_argument("--no-grad-checkpoint", action="store_true",
+                    help="disable gradient checkpointing (uses more memory)")
     args = ap.parse_args()
 
     data = Path(args.data)
@@ -69,6 +77,11 @@ def main() -> None:
         "--max-seq-length", str(args.max_seq_length),
         "--mask-prompt",  # only train on the assistant target, not the prompt
     ]
+    if not args.no_grad_checkpoint:
+        # Native tool-call rows are long (~2200-2950 tok); without this the
+        # activation buffers swap a 16GB Mac to a crawl. Recomputing activations
+        # in the backward pass trades ~20-30% compute for a large memory drop.
+        cmd.append("--grad-checkpoint")
     print("running:", " ".join(cmd))
     raise SystemExit(subprocess.call(cmd))
 

@@ -206,6 +206,16 @@ def main() -> None:
 
     rng = _rng(args.seed)
     rows = augment(args.per_seed, rng)
+
+    # Multi-step trajectories carry the SEMANTIC diversity single-step seeds
+    # lack (same tool in many screen contexts). They are already diverse, so we
+    # add each step row a few times with light phrasing on the GOAL only — never
+    # touching the screen/tool/args, which must stay consistent with the step.
+    from training.trajectories import flatten as _flatten_trajs
+    traj_rows = _flatten_trajs()
+    for r in traj_rows:
+        rows.extend(_augment_generic_seed(r, 3, rng))
+
     rows = add_negative_samples(rows, rng)
     splits = _validate_and_split(rows, rng)
 

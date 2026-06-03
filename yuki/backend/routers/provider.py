@@ -53,6 +53,11 @@ async def set_key(body: ProviderKey) -> dict[str, str]:
 # measured reliability on Yuki's agent eval suite (graph_score, Tool RAG on):
 # qwen2.5:7b=0.90 (reliable), qwen2.5:3b=0.40, llama3.2:1b=0.10. Bigger = more
 # reliable for control; smaller = faster but better suited to chat/simple tasks.
+#
+# yuki-1b is our own LoRA fine-tune of llama3.2:1b on Yuki's native tool-call
+# format (see training/README.md). It triples the stock 1b's control reliability
+# (0.10 -> 0.30) at the same size; the residual gap is the 1b's raw JSON-syntax
+# reliability, which the 3b/7b clear. Built locally, fully on-device.
 _RECOMMENDED_OLLAMA: list[dict[str, str]] = [
     {"name": "qwen2.5:7b", "size": "~4.7 GB",
      "note": "Recommended — reliable Mac control (needs ~8GB RAM)"},
@@ -63,6 +68,26 @@ _RECOMMENDED_OLLAMA: list[dict[str, str]] = [
     {"name": "llama3.2:1b", "size": "~1.3 GB",
      "note": "Fastest; best for chat, not multi-step control"},
 ]
+
+# Yuki's own fine-tunes (built via training/, not yet published to a registry).
+# These are NOT pullable, so they're only surfaced as recommendations when the
+# user already has them installed locally — appended in list_ollama_models().
+_YUKI_FINETUNES: dict[str, dict[str, str]] = {
+    "yuki-1b": {"name": "yuki-1b", "size": "~2.5 GB",
+                "note": "Yuki's own fine-tune; fast, local-first, basic control (3× stock 1b)"},
+}
+
+
+def _recommendations_for(installed_names: set[str]) -> list[dict[str, str]]:
+    """Recommendations to show, given the locally-installed model names.
+
+    Yuki's own fine-tunes aren't pullable from a registry yet, so they only
+    appear when already installed (matched on the base name, ignoring any tag).
+    They're listed first since they're the local-first default we tuned.
+    """
+    bases = {n.split(":")[0] for n in installed_names}
+    extra = [meta for key, meta in _YUKI_FINETUNES.items() if key in bases]
+    return extra + _RECOMMENDED_OLLAMA
 
 
 def _model_supports_tools(client: object, name: str) -> bool:
@@ -102,8 +127,11 @@ async def list_ollama_models() -> dict[str, object]:
                     {"name": str(name),
                      "tools": _model_supports_tools(client, str(name))}
                 )
+        # Surface Yuki's own fine-tunes as recommendations only when actually
+        # installed locally (they aren't pullable from a registry yet).
+        installed = {str(m["name"]) for m in models}
         return {"running": True, "models": models,
-                "recommended": _RECOMMENDED_OLLAMA}
+                "recommended": _recommendations_for(installed)}
     except Exception:
         return {"running": False, "models": [],
                 "recommended": _RECOMMENDED_OLLAMA}
