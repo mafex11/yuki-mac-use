@@ -45,8 +45,14 @@ _SWITCH_PHRASINGS = [
     "focus {app}", "show me {app}",
 ]
 
-# Light phrasing variants for non-app tasks (args stay identical).
-_REPHRASE_PREFIXES = ["", "please ", "could you ", "hey, ", "now "]
+# Light phrasing variants for non-app tasks (args stay identical). Expanded so
+# non-app seeds can reach a balanced per-tool budget (each prefix+suffix combo
+# is a distinct training phrasing without changing the correct tool/args).
+_REPHRASE_PREFIXES = [
+    "", "please ", "could you ", "hey, ", "now ", "can you ", "i'd like to ",
+    "go ahead and ", "let's ", "would you ",
+]
+_REPHRASE_SUFFIXES = ["", " please", " for me", " now", " real quick"]
 
 
 def _rng(seed: int) -> random.Random:
@@ -79,16 +85,16 @@ def _augment_app_seed(seed: dict[str, Any], n: int, rng: random.Random) -> list[
 
 
 def _augment_generic_seed(seed: dict[str, Any], n: int, rng: random.Random) -> list[dict[str, Any]]:
-    """Non-app seeds → light phrasing prefixes; args unchanged."""
+    """Non-app seeds → prefix+suffix phrasing variants; args unchanged."""
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     base = seed["task"]
     attempts = 0
-    while len(out) < n and attempts < n * 6:
+    while len(out) < n and attempts < n * 8:
         attempts += 1
         prefix = rng.choice(_REPHRASE_PREFIXES)
-        task = (prefix + base).strip()
-        # Capitalize naturally after a prefix like "please ".
+        suffix = rng.choice(_REPHRASE_SUFFIXES)
+        task = (prefix + base + suffix).strip()
         task = task[0].upper() + task[1:] if task else task
         if task in seen:
             continue
@@ -98,14 +104,34 @@ def _augment_generic_seed(seed: dict[str, Any], n: int, rng: random.Random) -> l
     return out
 
 
-def augment(per_seed: int, rng: random.Random) -> list[dict[str, Any]]:
-    """Expand all seeds. app_tool seeds get richer (name+verb) variety."""
-    rows: list[dict[str, Any]] = []
+def augment(per_seed: int, rng: random.Random, per_tool_target: int | None = None) -> list[dict[str, Any]]:
+    """Expand seeds with BALANCED per-tool representation.
+
+    Class imbalance (app_tool dominating) made the first fine-tune over-predict
+    app_tool. So instead of a flat per-seed count (which let app_tool's huge
+    name×verb variety dwarf other tools), we set a per-TOOL row budget and split
+    it across that tool's seeds. Result: every tool gets ~equal representation,
+    removing the "guess app_tool when unsure" prior.
+
+    per_tool_target defaults to ~ per_seed * 4 (a reasonable balanced budget).
+    """
+    if per_tool_target is None:
+        per_tool_target = per_seed * 4
+
+    # Group seeds by tool.
+    by_tool: dict[str, list[dict[str, Any]]] = {}
     for seed in SEEDS:
-        if seed["tool"] == "app_tool":
-            rows.extend(_augment_app_seed(seed, per_seed, rng))
-        else:
-            rows.extend(_augment_generic_seed(seed, per_seed, rng))
+        by_tool.setdefault(seed["tool"], []).append(seed)
+
+    rows: list[dict[str, Any]] = []
+    for tool, seeds in by_tool.items():
+        # Split this tool's budget across its seeds (at least 1 each).
+        per_seed_here = max(1, per_tool_target // len(seeds))
+        for seed in seeds:
+            if tool == "app_tool":
+                rows.extend(_augment_app_seed(seed, per_seed_here, rng))
+            else:
+                rows.extend(_augment_generic_seed(seed, per_seed_here, rng))
     return rows
 
 
