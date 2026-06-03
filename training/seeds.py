@@ -119,6 +119,53 @@ SEEDS: list[dict[str, Any]] = [
     {"task": "thanks", "screen": "", "tool": "done_tool",
      "args": _t("Acknowledge politely.", answer="You're welcome!")},
 
+    # ---- done_tool: EXPANDED conversational coverage ----
+    # These teach the "just answer, no desktop action" boundary across many
+    # surface forms so the model stops reaching for app_tool on questions/chat.
+    {"task": "what's 12 times 8", "screen": "", "tool": "done_tool",
+     "args": _t("Compute and answer directly.", answer="12 times 8 is 96.")},
+    {"task": "who wrote Romeo and Juliet", "screen": "", "tool": "done_tool",
+     "args": _t("Answer the factual question.", answer="William Shakespeare wrote Romeo and Juliet.")},
+    {"task": "how many continents are there", "screen": "", "tool": "done_tool",
+     "args": _t("Answer directly.", answer="There are seven continents.")},
+    {"task": "what time zone is New York in", "screen": "", "tool": "done_tool",
+     "args": _t("Answer directly.", answer="New York is in the Eastern Time zone (ET).")},
+    {"task": "explain what an API is briefly", "screen": "", "tool": "done_tool",
+     "args": _t("Explain concisely; no action.",
+                answer="An API is a defined way for two programs to talk to each "
+                       "other — one exposes functions, the other calls them.")},
+    {"task": "give me a fun fact", "screen": "", "tool": "done_tool",
+     "args": _t("Share a fact; no action.",
+                answer="Octopuses have three hearts and blue blood.")},
+    {"task": "good morning", "screen": "", "tool": "done_tool",
+     "args": _t("Greet back.", answer="Good morning! What can I do for you?")},
+    {"task": "hey there", "screen": "", "tool": "done_tool",
+     "args": _t("Greet the user.", answer="Hey! How can I help?")},
+    {"task": "what can you do", "screen": "", "tool": "done_tool",
+     "args": _t("Describe capabilities; no action.",
+                answer="I can control your Mac — open apps, type, click, run "
+                       "shortcuts and shell commands — and answer questions.")},
+    {"task": "are you there", "screen": "", "tool": "done_tool",
+     "args": _t("Confirm presence.", answer="Yes, I'm here. What do you need?")},
+    {"task": "tell me a joke", "screen": "", "tool": "done_tool",
+     "args": _t("Tell a joke; no action.",
+                answer="Why do programmers prefer dark mode? Because light "
+                       "attracts bugs.")},
+    {"task": "what is the largest planet", "screen": "", "tool": "done_tool",
+     "args": _t("Answer directly.", answer="Jupiter is the largest planet in our solar system.")},
+    {"task": "nice, thank you so much", "screen": "", "tool": "done_tool",
+     "args": _t("Acknowledge warmly.", answer="Happy to help!")},
+    {"task": "summarize what photosynthesis is", "screen": "", "tool": "done_tool",
+     "args": _t("Explain concisely.",
+                answer="Photosynthesis is how plants turn sunlight, water, and "
+                       "CO2 into energy (sugar) and oxygen.")},
+    {"task": "do you understand", "screen": "", "tool": "done_tool",
+     "args": _t("Confirm understanding.", answer="Yes, understood.")},
+    {"task": "what's the weather like", "screen": "", "tool": "done_tool",
+     "args": _t("No live weather access; answer honestly.",
+                answer="I can't check live weather, but I can open a weather site "
+                       "if you'd like.")},
+
     # ---- desktop_tool: spaces (distinct intent) ----
     {"task": "create a new desktop space", "screen": "", "tool": "desktop_tool",
      "args": _t("Add a virtual desktop.", action="create")},
