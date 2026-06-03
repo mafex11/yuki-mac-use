@@ -61,6 +61,72 @@ class ChatOllama(BaseChatLLM):
             for p in ("qwen3", "deepseek-r1", "deepseek-v3", "gpt-oss")
         )
 
+    def _is_yuki_tuned(self) -> bool:
+        """Fine-tuned Yuki models (yuki-1b, yuki-3b, …) were trained on a custom
+        prompt format (system lists tools as text, model returns ONE JSON tool
+        call in the content) — NOT Ollama's native tools= API. Serving them via
+        that custom 'dialect' is what makes them work (they score ~0.8 in their
+        format vs ~0.1 via the native API). See training/README.md."""
+        return self._model.lower().startswith("yuki")
+
+    def _yuki_system_prompt(self, tools: list[Tool]) -> str:
+        """Build the trained-format system message: list the available tools as
+        text + state the single-JSON-tool-call contract. Mirrors
+        training/to_mlx._system_message so serving matches training exactly."""
+        lines = [
+            "You are Yuki, a macOS control agent. Choose exactly ONE tool to "
+            "begin the user's task and respond with a single JSON object:",
+            '{"tool": "<tool_name>", "args": {"thought": "...", ...}}',
+            "",
+            "Available tools:",
+        ]
+        for t in tools:
+            desc = (t.description or "").strip().splitlines()[0] if t.description else ""
+            lines.append(f"- {t.name}: {desc[:120]}")
+        lines += ["", "Always include a `thought`. Use done_tool to answer "
+                   "questions or report completion. Output ONLY the JSON object."]
+        return "\n".join(lines)
+
+    def _parse_yuki_toolcall(self, response: dict) -> LLMEvent:
+        """Parse the model's JSON tool call out of the message content into the
+        same LLMEvent(tool_call=...) shape the agent consumes from the native
+        path. Falls back to a TEXT event if no parseable JSON is found."""
+        message = response.get("message", {})
+        content = message.get("content", "") or ""
+        usage = TokenUsage(
+            prompt_tokens=response.get("prompt_eval_count", 0),
+            completion_tokens=response.get("eval_count", 0),
+            total_tokens=response.get("prompt_eval_count", 0) + response.get("eval_count", 0),
+            thinking_tokens=None,
+        )
+        try:
+            obj = json.loads(content[content.index("{"):content.rindex("}") + 1])
+            name = obj.get("tool")
+            args = obj.get("args", {})
+            if name and isinstance(args, dict):
+                return LLMEvent(
+                    type=LLMEventType.TOOL_CALL,
+                    tool_call=ToolCall(id=f"call_{uuid.uuid4().hex[:8]}",
+                                       name=name, params=args),
+                    usage=usage,
+                )
+        except (ValueError, json.JSONDecodeError):
+            pass
+        return LLMEvent(type=LLMEventType.TEXT, content=content, usage=usage)
+
+    def _yuki_params(self, messages: list[BaseMessage], tools: list[Tool]) -> dict:
+        """Build chat params for the Yuki dialect: prepend the trained-format
+        system prompt (replacing any existing system), NO native tools= field."""
+        ollama_messages = self._convert_messages(messages)
+        # Replace/insert our trained-format system message at the front.
+        ollama_messages = [m for m in ollama_messages if m.get("role") != "system"]
+        ollama_messages.insert(0, {"role": "system",
+                                   "content": self._yuki_system_prompt(tools)})
+        params = {"model": self._model, "messages": ollama_messages, **self.kwargs}
+        if self.temperature is not None:
+            params["options"] = {"temperature": self.temperature}
+        return params
+
     def _convert_messages(self, messages: List[BaseMessage]) -> List[dict]:
         """
         Convert BaseMessage objects to Ollama-compatible message dictionaries.
@@ -157,6 +223,12 @@ class ChatOllama(BaseChatLLM):
         ...
 
     def invoke(self, messages: list[BaseMessage], tools: list[Tool] = [], structured_output: BaseModel | None = None, json_mode: bool = False) -> LLMEvent:
+        # Fine-tuned Yuki models use the trained "dialect" (text-listed tools +
+        # JSON tool call in content), not Ollama's native tools= API.
+        if self._is_yuki_tuned() and tools and not structured_output:
+            response = self.client.chat(**self._yuki_params(messages, tools))
+            return self._parse_yuki_toolcall(response)
+
         ollama_messages = self._convert_messages(messages)
         ollama_tools = self._convert_tools(tools) if tools else None
 
@@ -203,6 +275,11 @@ class ChatOllama(BaseChatLLM):
         ...
 
     async def ainvoke(self, messages: list[BaseMessage], tools: list[Tool] = [], structured_output: BaseModel | None = None, json_mode: bool = False) -> LLMEvent:
+        # Fine-tuned Yuki models use the trained "dialect" (see invoke()).
+        if self._is_yuki_tuned() and tools and not structured_output:
+            response = await self.aclient.chat(**self._yuki_params(messages, tools))
+            return self._parse_yuki_toolcall(response)
+
         ollama_messages = self._convert_messages(messages)
         ollama_tools = self._convert_tools(tools) if tools else None
 
