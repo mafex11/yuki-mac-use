@@ -504,10 +504,17 @@ class Control:
 
     @property
     def Windows(self) -> List[WindowControl]:
-        """Get all windows of this application element."""
+        """Get all windows of this element.
+
+        Force-wrap as WindowControl rather than dispatching on role via
+        CreateControl: some apps (notably Arc) report their window elements with
+        role AXApplication, which CreateControl would map to ApplicationControl —
+        whose Status/IsMinimized re-read .Windows, causing infinite recursion.
+        Elements from the AX Windows attribute ARE windows, so type them as such.
+        """
         windows = GetAttribute(self.Element, Attribute.Windows)
         if windows:
-            return [CreateControl(w) for w in windows]  # type: ignore[misc]
+            return [WindowControl(element=w) for w in windows]
         return []
 
     @property
@@ -1199,10 +1206,17 @@ class ApplicationControl(Control):
 
     @property
     def Windows(self) -> List[WindowControl]:
-        """Get all windows of this application element."""
+        """Get all windows of this element.
+
+        Force-wrap as WindowControl rather than dispatching on role via
+        CreateControl: some apps (notably Arc) report their window elements with
+        role AXApplication, which CreateControl would map to ApplicationControl —
+        whose Status/IsMinimized re-read .Windows, causing infinite recursion.
+        Elements from the AX Windows attribute ARE windows, so type them as such.
+        """
         windows = GetAttribute(self.Element, Attribute.Windows)
         if windows:
-            return [CreateControl(w) for w in windows]  # type: ignore[misc]
+            return [WindowControl(element=w) for w in windows]
         return []
 
     @property

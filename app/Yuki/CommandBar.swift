@@ -98,6 +98,7 @@ struct CommandBarView: View {
     @State private var history: [Turn] = []
     @State private var liveActivity: String? = nil   // transient "working on it" line
     @State private var ctxBadge = ""
+    @State private var modelLabel = ""   // e.g. "ollama · qwen2.5:3b"
     @State private var busy = false
     @FocusState private var inputFocused: Bool
     @State private var pendingCapture: String? = nil
@@ -168,6 +169,12 @@ struct CommandBarView: View {
                     .disabled(busy)
                     .focused($inputFocused)
                     .onSubmit { submit() }
+                if !modelLabel.isEmpty {
+                    Text(modelLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .help("Active provider · model")
+                }
                 Text(ctxBadge).font(.caption2).foregroundStyle(.tertiary)
             }
             .padding(.horizontal, 16)
@@ -278,6 +285,11 @@ struct CommandBarView: View {
 
     private func loadStatus() {
         Task { ctxBadge = await Backend.shared.status().badge }
+        Task {
+            let provider = await Backend.shared.currentProvider()
+            let model = await Backend.shared.currentModel()
+            modelLabel = model.isEmpty ? provider : "\(provider) · \(model)"
+        }
     }
 
     private func runClear() {
