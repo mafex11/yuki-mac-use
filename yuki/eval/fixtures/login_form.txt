@@ -1,0 +1,4 @@
+# id|window|control_type|canonical|name|coords|focused|metadata
+0|Login|AXTextField|username_field|Username|(400,300)|YES|{"value":""}
+1|Login|AXTextField|password_field|Password|(400,360)|-|{"value":""}
+2|Login|AXButton|signin_button|Sign In|(400,430)|-|{}

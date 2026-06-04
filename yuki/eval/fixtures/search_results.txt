@@ -1,0 +1,4 @@
+# id|window|control_type|canonical|name|coords|focused|metadata
+0|Chrome|AXTextField|search_field|Search|(640,120)|-|{"value":"laptops"}
+1|Chrome|AXLink|result_link|Best laptops 2026 - Reviews|(300,260)|-|{}
+2|Chrome|AXLink|result_link|Top 10 laptops compared|(300,360)|-|{}

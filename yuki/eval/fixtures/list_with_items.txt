@@ -1,0 +1,4 @@
+# id|window|control_type|canonical|name|coords|focused|metadata
+0|Mail|AXButton|compose_button|Compose|(120,70)|-|{}
+1|Mail|AXRow|email_row|Invoice from Acme|(400,200)|-|{}
+2|Mail|AXRow|email_row|Meeting notes|(400,250)|-|{}

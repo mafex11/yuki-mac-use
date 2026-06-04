@@ -50,19 +50,19 @@ async def set_key(body: ProviderKey) -> dict[str, str]:
 
 # Curated tool-capable models Yuki recommends for local control. All support
 # the Ollama "tools" capability (required for the desktop agent). Notes reflect
-# measured reliability on Yuki's agent eval suite (graph_score, Tool RAG on):
-# qwen2.5:7b=0.90 (reliable), qwen2.5:3b=0.40, llama3.2:1b=0.10. Bigger = more
+# measured reliability on Yuki's agent eval suite (graph_score, Tool RAG on, the
+# 36-case set): qwen2.5:7b≈0.90, qwen2.5:3b=0.58, llama3.2:1b=0.10. Bigger = more
 # reliable for control; smaller = faster but better suited to chat/simple tasks.
 #
-# yuki-1b is our own LoRA fine-tune of llama3.2:1b on Yuki's native tool-call
-# format (see training/README.md). It triples the stock 1b's control reliability
-# (0.10 -> 0.30) at the same size; the residual gap is the 1b's raw JSON-syntax
-# reliability, which the 3b/7b clear. Built locally, fully on-device.
+# Fine-tuning finding (see training/README.md): a narrow LoRA HELPS a weak base
+# (llama3.2:1b 0.10 -> yuki-1b 0.28) but HURTS a strong one (qwen2.5:3b 0.58 ->
+# yuki-3b 0.36, catastrophic forgetting). So we recommend STOCK qwen2.5:3b as the
+# mid-tier, not a fine-tune, and keep yuki-1b only as a lightweight option.
 _RECOMMENDED_OLLAMA: list[dict[str, str]] = [
     {"name": "qwen2.5:7b", "size": "~4.7 GB",
      "note": "Recommended — reliable Mac control (needs ~8GB RAM)"},
     {"name": "qwen2.5:3b", "size": "~1.9 GB",
-     "note": "Lighter; OK for simple tasks, less reliable for control"},
+     "note": "Good control, lighter; best mid-tier local option"},
     {"name": "llama3.2:3b", "size": "~2.0 GB",
      "note": "Well-rounded, tool-tuned; lighter than 7B"},
     {"name": "llama3.2:1b", "size": "~1.3 GB",
@@ -72,9 +72,11 @@ _RECOMMENDED_OLLAMA: list[dict[str, str]] = [
 # Yuki's own fine-tunes (built via training/, not yet published to a registry).
 # These are NOT pullable, so they're only surfaced as recommendations when the
 # user already has them installed locally — appended in list_ollama_models().
+# Only yuki-1b ships: fine-tuning improved the weak 1b but degraded the strong
+# 3b (use stock qwen2.5:3b for that tier instead).
 _YUKI_FINETUNES: dict[str, dict[str, str]] = {
     "yuki-1b": {"name": "yuki-1b", "size": "~2.5 GB",
-                "note": "Yuki's own fine-tune; fast, local-first, basic control (3× stock 1b)"},
+                "note": "Yuki's own fine-tune of llama3.2:1b; fast, local, basic control"},
 }
 
 

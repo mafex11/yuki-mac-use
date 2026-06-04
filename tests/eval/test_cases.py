@@ -15,9 +15,21 @@ def test_cases_nonempty_and_typed() -> None:
             assert step.tool  # non-empty tool name
 
 
-def test_every_plan_ends_with_done_for_action_tasks() -> None:
+def test_nonreactive_plans_end_with_done() -> None:
+    # Reactive cases are graded on the FIRST step only (run.py), so they carry a
+    # single expected step and need not include the terminal done_tool. Full
+    # (non-reactive) plans should still end by reporting completion.
     for c in CASES:
-        assert c.expected_plan[-1].tool == "done_tool", c.task
+        if not c.reactive:
+            assert c.expected_plan[-1].tool == "done_tool", c.task
+
+
+def test_reactive_cases_have_single_expected_step() -> None:
+    # The harness only grades emitted[0] for reactive cases; extra expected
+    # steps would be silently ignored, so keep them to one.
+    for c in CASES:
+        if c.reactive:
+            assert len(c.expected_plan) == 1, c.task
 
 
 def test_tool_names_are_real() -> None:

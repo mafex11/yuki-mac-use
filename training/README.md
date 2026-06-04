@@ -97,20 +97,31 @@ cd training && ollama create yuki-1b -f Modelfile
 uv run python -m yuki.eval.run --model yuki-1b --mode flash
 ```
 
-**Measured results (graph_score, Tool RAG on):**
+**Measured results (graph_score, Tool RAG on, the 36-case eval):**
 
 | model | score | note |
 |-------|-------|------|
-| llama3.2:1b (stock) | 0.10 | baseline |
-| **yuki-1b** (this fine-tune) | **0.30** | 3× stock; capped by 1b JSON-syntax errors |
-| qwen2.5:3b (stock) | 0.40 | next ladder rung |
-| qwen2.5:7b (stock) | 0.90 | reliable |
+| llama3.2:1b (stock) | 0.10 | weak base |
+| **yuki-1b** (fine-tune) | **0.28** | ~3× stock; capped by 1b JSON-syntax errors |
+| **yuki-3b** (fine-tune) | 0.36 | **WORSE than stock 3b — do not ship** |
+| qwen2.5:3b (stock) | **0.58** | strong base; best mid-tier — ship as-is |
+| qwen2.5:7b (stock) | ~0.90 | reliable |
 
-yuki-1b's residual failures are malformed JSON (`{"name":"launch"…}`, dropped
-braces, `App_tool`), not wrong tool choice — the 1b's structured-output wall.
+> The first measurements used a 10-case eval with ±0.1 noise that *hid* the 3b
+> regression (yuki-3b and stock both looked like ~0.30). Expanding to 36 cases
+> made the real picture measurable. **If you can't measure it, you can't tune
+> it** — grow the eval before trusting a fine-tune delta.
 
-## The ladder
+## The ladder — and where it stops
 
-**llama3.2:1b → 3b → 7b, stop when eval clears the bar.** The 1b proved the
-pipeline works (0.10 → 0.30) but hit its capacity wall on JSON syntax. Climb to
-3b (better structured-output reliability) on the SAME data + pipeline.
+**llama3.2:1b → 3b → 7b**, but the lesson is subtler than "always climb":
+
+- **Fine-tuning HELPS a weak base.** llama3.2:1b 0.10 → yuki-1b 0.28: the LoRA
+  taught a model that couldn't tool-call at all to mostly do it.
+- **Fine-tuning HURTS a strong base.** qwen2.5:3b 0.58 → yuki-3b 0.36: a narrow
+  64-trajectory LoRA caused *catastrophic forgetting*, overwriting qwen's broad
+  pretrained tool competence with our small distribution.
+
+So: **ship stock qwen2.5:3b** for the mid-tier (don't fine-tune it), and keep
+yuki-1b only as the lightweight option. To beat stock 3b we'd need a much
+larger, more diverse dataset (hundreds of trajectories) — not 64.
