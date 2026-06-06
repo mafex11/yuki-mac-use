@@ -5,6 +5,15 @@ import json
 WARNING_MESSAGE="The desktop UI services are temporarily unavailable. Please wait a few seconds and continue."
 EMPTY_MESSAGE="No elements found"
 
+
+def _clip(s: object, limit: int = 120) -> str:
+    """Cap a free-text AX field. A single node's name/value can be an app's
+    entire text content (terminal scrollback, editor document) — left whole it
+    floods the agent's context (observed: a 558KB state message) and pushes
+    small local models out of tool-calling into prose. Keep rows compact."""
+    text = str(s)
+    return text if len(text) <= limit else text[:limit] + "…"
+
 if TYPE_CHECKING:
     from yuki.ax.core import Rect
 
@@ -38,8 +47,8 @@ class TreeState:
             None,
         )
         if focused is not None:
-            value = focused.metadata.get("value") or ""
-            placeholder = focused.metadata.get("placeholder") or ""
+            value = _clip(focused.metadata.get("value") or "")
+            placeholder = _clip(focused.metadata.get("placeholder") or "")
             parts.append(
                 "<focused_input>\n"
                 f"canonical={focused.canonical} window={focused.window_name} "
@@ -52,12 +61,20 @@ class TreeState:
         lean = verbosity == "lean"
         nodes = self.interactive_nodes
         if lean:
+            # Drop the always-present desktop chrome (Dock items, menu-bar /
+            # Control Centre items). It's never the target of a task — launching
+            # uses app_tool, not Dock clicks — and on a busy Mac it floods the
+            # context with 20-40 distractor rows that push small local models
+            # (qwen2.5, llama3.2) out of tool-calling into prose replies.
+            _CHROME_TYPES = {"AXDockItem", "AXMenuBarItem"}
+            nodes = [n for n in self.interactive_nodes
+                     if n.control_type not in _CHROME_TYPES]
             priority = {
                 "url_bar": 0, "search_field": 1, "primary_input": 2,
                 "text_input": 3, "submit_button": 4,
             }
             nodes = sorted(
-                self.interactive_nodes,
+                nodes,
                 key=lambda n: (not n.is_focused, priority.get(n.canonical or "", 9)),
             )[:max_nodes]
 
@@ -67,13 +84,15 @@ class TreeState:
             canonical = node.canonical or "-"
             focused_mark = "YES" if node.is_focused else "-"
             if lean:
-                meta = {k: node.metadata[k] for k in ("value", "placeholder")
+                meta = {k: _clip(node.metadata[k]) for k in ("value", "placeholder")
                         if k in node.metadata}
+                name = _clip(node.name)
             else:
                 meta = node.metadata
+                name = node.name
             row = (
                 f"{idx}|{node.window_name}|{node.control_type}|{canonical}|"
-                f"{node.name}|{node.center.to_string()}|{focused_mark}|"
+                f"{name}|{node.center.to_string()}|{focused_mark}|"
                 f"{json.dumps(meta)}"
             )
             rows.append(row)
@@ -88,12 +107,13 @@ class TreeState:
         if not self.scrollable_nodes and self.status:
             parts.append(EMPTY_MESSAGE)
             return "\n".join(parts)
-        # TOON-like format
+        # TOON-like format. Clip names: a scrollable area's name can be its
+        # whole text content (same flooding risk as interactive elements).
         header = "# id|window|control_type|name|coords|metadata"
         rows = [header]
         base_index = len(self.interactive_nodes)
         for idx, node in enumerate(self.scrollable_nodes):
-            row = (f"{base_index + idx}|{node.window_name}|{node.control_type}|{node.name}|"
+            row = (f"{base_index + idx}|{node.window_name}|{node.control_type}|{_clip(node.name)}|"
                    f"{node.center.to_string()}|{json.dumps(node.metadata)}")
             rows.append(row)
         parts.append("\n".join(rows))
