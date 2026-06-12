@@ -200,6 +200,26 @@ def click_tool(loc:Optional[list[int]]=None,button:Literal['left','right','middl
     num_clicks={1:'Single',2:'Double',3:'Triple'}
     return f'{num_clicks.get(clicks)} {button} clicked at ({x},{y}).'
 
+def _element_at(desktop:_Desktop, x:int, y:int):
+    """Return the interactive node whose bounding box contains (x,y), or None.
+
+    Used to GROUND typing: we report what the target coordinate actually is so a
+    mis-aimed type (e.g. into the wrong app's chrome) surfaces honestly instead
+    of returning a false 'Typed ...' success.
+    """
+    state = getattr(desktop, 'desktop_state', None)
+    tree = getattr(state, 'tree_state', None) if state else None
+    nodes = getattr(tree, 'interactive_nodes', None) or []
+    for node in nodes:
+        bb = node.bounding_box
+        if bb.left <= x <= bb.right and bb.top <= y <= bb.bottom:
+            return node
+    return None
+
+
+_TEXT_CANONICALS = {"url_bar", "search_field", "primary_input", "text_input"}
+
+
 @Tool('type_tool',model=Type)
 def type_tool(loc:Optional[list[int]]=None,text:str='',clear:Literal['true','false']='false',caret_position:Literal['start','idle','end']='idle',press_enter:Literal['true','false']='false',**kwargs):
     '''
@@ -213,8 +233,31 @@ def type_tool(loc:Optional[list[int]]=None,text:str='',clear:Literal['true','fal
     '''
     x,y=loc
     desktop:_Desktop=kwargs['desktop']
+
+    # Ground the target BEFORE typing: what is actually at (x,y) in the last
+    # observed state? A coordinate that hits no element, or a non-text element,
+    # almost always means the model is typing into the wrong place (stale coords,
+    # wrong app focused). Surface that honestly so it can re-focus instead of
+    # silently typing into the void.
+    target = _element_at(desktop, x, y)
+
     desktop.type(loc=loc,text=text,caret_position=caret_position,clear=clear,press_enter=press_enter)
-    return f'Typed {text} at ({x},{y}).'
+
+    if target is None:
+        return (f"Typed {text!r} at ({x},{y}), but NO interactive element was listed "
+                f"at those coordinates in the last Desktop State. The text may have "
+                f"gone nowhere or into the wrong window. Re-read the Desktop State and "
+                f"confirm a text field is focused (check the <focused_input> block) "
+                f"before typing again.")
+    canonical = target.canonical or ""
+    if canonical not in _TEXT_CANONICALS and target.control_type not in (
+        "AXTextField", "AXTextArea", "AXComboBox", "AXSearchField"
+    ):
+        return (f"Typed {text!r} at ({x},{y}), but the element there is "
+                f"{target.control_type}/{canonical or 'untagged'} ({target.name!r}), "
+                f"not a text input. If the text didn't land where you intended, find a "
+                f"row whose canonical is url_bar/search_field/text_input and type there.")
+    return f"Typed {text!r} into {canonical or target.control_type} ({target.name!r}) at ({x},{y})."
 
 @Tool('scroll_tool',model=Scroll)
 def scroll_tool(loc:Optional[list[int]]=None,type:Literal['horizontal','vertical']='vertical',direction:Literal['up','down','left','right']='down',wheel_times:int=1,**kwargs)->str:

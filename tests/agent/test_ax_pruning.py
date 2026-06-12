@@ -2,7 +2,7 @@
 """interactive_elements_to_string lean mode caps nodes + trims metadata."""
 from __future__ import annotations
 
-from yuki.agent.tree.views import TreeState, TreeElementNode, Center, BoundingBox
+from yuki.agent.tree.views import BoundingBox, Center, TreeElementNode, TreeState
 
 
 def _bbox(idx: int) -> BoundingBox:
@@ -94,6 +94,27 @@ def test_full_mode_keeps_chrome_and_full_names() -> None:
     out = ts.interactive_elements_to_string(verbosity="full")
     assert "AXDockItem" in out
     assert huge in out             # not clipped in full mode
+
+
+def test_full_mode_hard_caps_huge_screens() -> None:
+    # A giant Electron app (claw-layerpath, Arc) can expose hundreds of AX nodes.
+    # Full mode used to dump ALL of them with full metadata, blowing past even a
+    # 128k context (observed: 272k tokens → gpt-4o 400s before step 1). Full mode
+    # must hard-cap node count too, and SAY it truncated (no silent drop).
+    nodes = [_node(i) for i in range(400)]
+    ts = TreeState(interactive_nodes=nodes, status=True)
+    out = ts.interactive_elements_to_string(verbosity="full", hard_cap=150)
+    assert out.count("AXButton") <= 150
+    assert "truncated" in out.lower() or "showing" in out.lower()
+
+
+def test_full_mode_small_screen_not_truncated() -> None:
+    # Under the cap, full mode is unchanged — no truncation note, all nodes.
+    nodes = [_node(i) for i in range(10)]
+    ts = TreeState(interactive_nodes=nodes, status=True)
+    out = ts.interactive_elements_to_string(verbosity="full", hard_cap=150)
+    assert out.count("AXButton") == 10
+    assert "truncated" not in out.lower()
 
 
 def test_lean_mode_keeps_state_metadata() -> None:

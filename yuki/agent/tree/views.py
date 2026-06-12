@@ -30,8 +30,10 @@ class TreeState:
         self,
         verbosity: str = "full",
         max_nodes: int = 25,
+        hard_cap: int = 150,
     ) -> str:
         parts = []
+        truncated_from = 0
         if not self.status:
             parts.append(WARNING_MESSAGE)
             return "\n".join(parts)
@@ -90,9 +92,37 @@ class TreeState:
                 return (not n.is_focused, base)
 
             nodes = sorted(nodes, key=_rank)[:max_nodes]
+        elif len(nodes) > hard_cap:
+            # Full mode (cloud models) keeps rich metadata, but a giant Electron
+            # app can expose hundreds of nodes and blow past even a 128k context
+            # window (observed: 272k tokens → the request 400s before step 1).
+            # Hard-cap by the same priority ranking lean uses, and SAY we did —
+            # silent truncation would read as "this is the whole screen".
+            priority = {
+                "url_bar": 0, "search_field": 1, "primary_input": 2,
+                "text_input": 3, "submit_button": 4, "toggle": 5, "checkbox": 5,
+                "radio_button": 5, "slider": 6, "popup_button": 6, "tab": 6,
+                "link": 7, "button": 8,
+            }
+
+            def _rank_full(n: 'TreeElementNode') -> tuple[bool, int]:
+                has_state = any(
+                    k in n.metadata for k in ("checked", "selected", "expanded")
+                )
+                base = priority.get(n.canonical or "", 8 if has_state else 10)
+                return (not n.is_focused, base)
+
+            truncated_from = len(nodes)
+            nodes = sorted(nodes, key=_rank_full)[:hard_cap]
 
         header = "# id|window|control_type|canonical|name|coords|focused|metadata"
         rows = [header]
+        if truncated_from:
+            rows.append(
+                f"# NOTE: showing the {len(nodes)} most relevant of {truncated_from} "
+                f"interactive elements (screen truncated to fit context). If the element "
+                f"you need isn't listed, scroll or narrow the active window."
+            )
         for idx, node in enumerate(nodes):
             canonical = node.canonical or "-"
             focused_mark = "YES" if node.is_focused else "-"
