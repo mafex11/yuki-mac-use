@@ -1,17 +1,21 @@
 """Headless autonomy demo — does Yuki DECOMPOSE a goal, or act like a robot?
 
-Builds the REAL system prompt + tools and asks the configured/!specified model
-the one-line goal "open a MrBeast video on YouTube in Chrome" with a synthetic
-empty-desktop state. We do NOT run the agent loop (that would drive the real
-Mac); we inspect the model's FIRST tool call:
+Builds the REAL system prompt + tools and asks the configured/specified model a
+one-line goal (pass any with --goal) against a synthetic empty-desktop state. We
+do NOT run the full agent loop (that would drive the real Mac); we inspect the
+model's FIRST tool call:
 
-  - robot behavior  -> a single literal action, empty/absent `plan`
-  - intelligent     -> first action is app_tool(Chrome) AND `plan` lists the
-                       remaining steps (new tab, navigate, search, click, done)
+  - robot behavior  -> a single literal action, empty/absent `plan`, no thought
+  - intelligent     -> a reasoned `thought` plus a multi-step `plan`, or a direct
+                       sensible answer for a pure-question goal
+
+Scoring is goal-agnostic — it checks for reasoning + decomposition, never for a
+specific app or keyword.
 
 Usage:
+    uv run python scripts/demo_autonomy.py --goal "open spotify and play lofi"
+    uv run python scripts/demo_autonomy.py --provider openai --goal "check the weather"
     uv run python scripts/demo_autonomy.py --provider ollama --model qwen2.5:7b
-    uv run python scripts/demo_autonomy.py --provider anthropic   # needs key
 """
 
 from __future__ import annotations
@@ -19,13 +23,17 @@ from __future__ import annotations
 import argparse
 import json
 
+from dotenv import load_dotenv
+
 from yuki.agent.desktop.views import Browser
 from yuki.agent.prompt.service import Prompt
 from yuki.agent.tools import BUILTIN_TOOLS
 from yuki.messages import HumanMessage
 from yuki.providers.factory import agent_mode_for, make_llm
 
-GOAL = "open a MrBeast video on YouTube in Chrome"
+# A neutral default goal — NOT a goal baked into the prompt, so this measures
+# generalization rather than recall.
+GOAL = "open Spotify and play some focus music"
 
 # A plausible "nothing open yet" desktop state, built with the REAL human.md
 # template so the model sees exactly the framing the live agent sends.
@@ -50,6 +58,7 @@ def _empty_state_message(max_steps: int) -> str:
 
 
 def main() -> None:
+    load_dotenv(".env")
     ap = argparse.ArgumentParser()
     ap.add_argument("--provider", default=None)
     ap.add_argument("--model", default=None)
