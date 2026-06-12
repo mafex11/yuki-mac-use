@@ -72,11 +72,24 @@ class TreeState:
             priority = {
                 "url_bar": 0, "search_field": 1, "primary_input": 2,
                 "text_input": 3, "submit_button": 4,
+                # Stateful controls rank above plain buttons/links so the 25-node
+                # cap never silently drops a toggle/checkbox/slider the user may
+                # be asking about (e.g. "is Bluetooth on?").
+                "toggle": 5, "checkbox": 5, "radio_button": 5,
+                "slider": 6, "popup_button": 6, "tab": 6,
             }
-            nodes = sorted(
-                nodes,
-                key=lambda n: (not n.is_focused, priority.get(n.canonical or "", 9)),
-            )[:max_nodes]
+
+            def _rank(n: 'TreeElementNode') -> tuple[bool, int]:
+                # Focused first; then by canonical priority; a control carrying
+                # explicit state (checked/selected) is treated as high-priority
+                # even if its canonical tag isn't in the table above.
+                has_state = any(
+                    k in n.metadata for k in ("checked", "selected", "expanded")
+                )
+                base = priority.get(n.canonical or "", 7 if has_state else 9)
+                return (not n.is_focused, base)
+
+            nodes = sorted(nodes, key=_rank)[:max_nodes]
 
         header = "# id|window|control_type|canonical|name|coords|focused|metadata"
         rows = [header]
@@ -84,7 +97,13 @@ class TreeState:
             canonical = node.canonical or "-"
             focused_mark = "YES" if node.is_focused else "-"
             if lean:
-                meta = {k: _clip(node.metadata[k]) for k in ("value", "placeholder")
+                # Keep value/placeholder AND element STATE (checked/selected/
+                # expanded/current selection). State is what lets the model see a
+                # toggle's on/off position or a popup's current choice — dropping
+                # it makes a checkbox indistinguishable from a button.
+                _KEEP = ("value", "placeholder", "checked", "selected",
+                         "expanded", "title")
+                meta = {k: _clip(node.metadata[k]) for k in _KEEP
                         if k in node.metadata}
                 name = _clip(node.name)
             else:

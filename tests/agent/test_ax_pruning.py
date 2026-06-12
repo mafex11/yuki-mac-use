@@ -94,3 +94,24 @@ def test_full_mode_keeps_chrome_and_full_names() -> None:
     out = ts.interactive_elements_to_string(verbosity="full")
     assert "AXDockItem" in out
     assert huge in out             # not clipped in full mode
+
+
+def test_lean_mode_keeps_state_metadata() -> None:
+    # Spec R WS3: lean mode must surface element STATE (checked/selected/
+    # expanded), not just value/placeholder — otherwise the model can't tell a
+    # toggle's on/off position. Previously these keys were trimmed away.
+    n = TreeElementNode(
+        bounding_box=_bbox(0),
+        center=Center(x=0, y=0),
+        name="Bluetooth",
+        control_type="AXCheckBox",
+        window_name="System Settings",
+        canonical="toggle",
+        is_focused=False,
+        metadata={"checked": False, "noise": "x" * 50},
+    )
+    ts = TreeState(interactive_nodes=[n], status=True)
+    out = ts.interactive_elements_to_string(verbosity="lean")
+    assert "checked" in out        # state surfaced
+    assert "toggle" in out         # canonical tag surfaced
+    assert "noise" not in out      # genuine noise still trimmed

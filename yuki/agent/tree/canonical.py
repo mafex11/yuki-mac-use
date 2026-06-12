@@ -75,7 +75,47 @@ def classify(node: TreeElementNode, *, is_focused: bool) -> str | None:
     if role == "AXLink":
         return "link"
 
+    # Tabs: radio/button inside an AXTabGroup. Checked before the generic
+    # radio_button rule so a tab is never mislabeled as a radio.
     if node.metadata.get("in_tab_group") and role in ("AXRadioButton", "AXButton"):
         return "tab"
+
+    # Generic clickable button — a plain "Reload"/"Refresh" with no submit/cancel
+    # name. Previously returned None, leaving the model to guess from AXButton.
+    if role == "AXButton":
+        return "button"
+
+    # Checkboxes and toggle switches. macOS exposes a switch as an AXCheckBox
+    # with subrole AXSwitch; distinguish so the model knows it's an on/off toggle
+    # (state lives in metadata['checked'], surfaced by the walk).
+    if role in ("AXCheckBox", "AXToggle"):
+        if subrole == "AXSwitch":
+            return "toggle"
+        return "checkbox"
+
+    # Standalone radio button (a tab inside a tab group was handled above).
+    if role == "AXRadioButton":
+        return "radio_button"
+
+    if role == "AXSlider":
+        return "slider"
+
+    if role in ("AXStepper", "AXIncrementor"):
+        return "stepper"
+
+    if role == "AXPopUpButton":
+        return "popup_button"
+
+    if role in ("AXMenuItem", "AXMenuButton", "AXMenuBarItem"):
+        return "menu_item"
+
+    if role == "AXDisclosureTriangle":
+        return "disclosure"
+
+    if role in ("AXSegmentedControl",):
+        return "segmented_control"
+
+    if role == "AXImage":
+        return "image"
 
     return None

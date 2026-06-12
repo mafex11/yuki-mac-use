@@ -549,9 +549,26 @@ class Tree:
                     if value := late['value']:
                         metadata['selected'] = value
 
+                elif role in ("AXCheckBox", "AXToggle"):
+                    # AXValue is 0/1 (or bool). Surface it as on/off state so the
+                    # model can tell a toggle's current position — e.g. whether
+                    # Bluetooth is already ON before it clicks.
+                    raw = late['value']
+                    if raw is not None:
+                        metadata['checked'] = bool(raw) if isinstance(raw, (int, bool)) else str(raw)
+
+                elif role == "AXSlider":
+                    # Numeric position of the slider (volume, brightness, etc.).
+                    if late['value'] is not None:
+                        metadata['value'] = late['value']
+
                 elif role == "AXPopUpButton":
                     if title_ui_element_text:
                         metadata['title'] = title_ui_element_text
+                    # The currently-selected option (AXValue) — what the popup
+                    # shows right now, so the model knows the current choice.
+                    if late['value'] is not None:
+                        metadata['value'] = late['value']
 
                 elif role == "AXLink":
                     if url := late['url']:
