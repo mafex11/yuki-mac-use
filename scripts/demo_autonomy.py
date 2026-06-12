@@ -73,6 +73,23 @@ def main() -> None:
 
     from yuki.messages import SystemMessage
 
+    # Replicate the LIVE control path: for Ollama, the backend applies Tool RAG
+    # (top-K relevant tools + core) instead of all 16. Dumping all 16 tools is a
+    # KNOWN failure mode for local models (they emit no/garbage tool calls) — so
+    # a fair test must use the same tool selection the real agent uses.
+    tools = BUILTIN_TOOLS
+    if llm.provider == "ollama":
+        try:
+            from yuki.agent.toolrag import ToolSelector
+            from yuki.memory.embeddings import OllamaEmbedder
+
+            selector = ToolSelector(list(BUILTIN_TOOLS), embedder=OllamaEmbedder())
+            tools = selector.select(args.goal)
+            print(f"[Tool RAG] {len(tools)}/{len(BUILTIN_TOOLS)} tools: "
+                  f"{[t.name for t in tools]}")
+        except Exception as e:  # noqa: BLE001
+            print(f"[Tool RAG unavailable: {type(e).__name__}; using all tools]")
+
     # Mirror the live agent's message order: system, TASK, then desktop state.
     messages = [
         SystemMessage(content=system),
@@ -80,7 +97,7 @@ def main() -> None:
         HumanMessage(content=_empty_state_message(25)),
     ]
 
-    event = llm.invoke(messages=messages, tools=BUILTIN_TOOLS)
+    event = llm.invoke(messages=messages, tools=tools)
 
     tc = getattr(event, "tool_call", None)
     thinking = getattr(getattr(event, "thinking", None), "content", None)

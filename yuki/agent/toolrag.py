@@ -18,8 +18,22 @@ if TYPE_CHECKING:
 
 log = logging.getLogger("yuki")
 
-# Essentials that must always be available regardless of similarity.
-_CORE = ("done_tool", "app_tool", "shell_tool")
+# Essentials that must ALWAYS be available regardless of task similarity.
+# These are the universal primitives every multi-step GUI task needs: launch an
+# app, type, click, press a shortcut, wait for the UI to settle, run a shell
+# command, and finish. Omitting any of them silently breaks decomposition —
+# e.g. without type_tool the model can open Chrome but can never type a URL, so
+# it stalls re-launching the app. (Observed with qwen2.5:7b on "open a MrBeast
+# video on YouTube in Chrome": Tool RAG had dropped type_tool/click_tool.)
+_CORE = (
+    "done_tool",
+    "app_tool",
+    "type_tool",
+    "click_tool",
+    "shortcut_tool",
+    "wait_tool",
+    "shell_tool",
+)
 
 
 def _cosine(a: list[float], b: list[float]) -> float:

@@ -18,19 +18,38 @@ def _tools() -> list[Tool]:
         mk("done_tool", "Finish and answer the user"),
         mk("scroll_tool", "Scroll the screen up or down"),
         mk("shortcut_tool", "Press a keyboard shortcut"),
+        mk("wait_tool", "Wait for the UI to settle"),
+        mk("memory_tool", "Persist data across steps"),
+        mk("desktop_tool", "Manage virtual desktops"),
     ]
+
+# The GUI primitives every multi-step task needs — must survive Tool RAG.
+_GUI_PRIMITIVES = {
+    "done_tool", "app_tool", "type_tool", "click_tool",
+    "shortcut_tool", "wait_tool", "shell_tool",
+}
 
 
 def test_core_tools_always_included() -> None:
     sel = ToolSelector(_tools(), embedder=StubEmbedder(dim=32), top_k=2)
     chosen = {t.name for t in sel.select("open calculator")}
-    assert {"done_tool", "app_tool", "shell_tool"} <= chosen
+    assert chosen >= _GUI_PRIMITIVES
+
+
+def test_type_and_click_always_present() -> None:
+    # Regression: a GUI goal whose embedding doesn't rank type/click top-K must
+    # STILL get them — without type_tool the agent can open an app but never
+    # type, so it stalls. (Real failure on qwen2.5:7b + "MrBeast on YouTube".)
+    sel = ToolSelector(_tools(), embedder=StubEmbedder(dim=32), top_k=2)
+    chosen = {t.name for t in sel.select("open spotify")}
+    assert "type_tool" in chosen
+    assert "click_tool" in chosen
 
 
 def test_select_returns_subset_not_all() -> None:
     tools = _tools()
     sel = ToolSelector(tools, embedder=StubEmbedder(dim=32), top_k=2)
-    chosen = sel.select("type some text")
+    chosen = sel.select("manage my virtual desktops")
     assert len(chosen) < len(tools)
 
 
@@ -38,10 +57,10 @@ def test_select_is_capped_by_k_plus_core() -> None:
     tools = _tools()
     sel = ToolSelector(tools, embedder=StubEmbedder(dim=32), top_k=2)
     chosen = sel.select("anything")
-    assert len(chosen) <= 2 + 3
+    assert len(chosen) <= 2 + len(_GUI_PRIMITIVES)
 
 
 def test_empty_task_returns_core_only() -> None:
     sel = ToolSelector(_tools(), embedder=StubEmbedder(dim=32), top_k=2)
     chosen = {t.name for t in sel.select("")}
-    assert {"done_tool", "app_tool", "shell_tool"} <= chosen
+    assert chosen >= _GUI_PRIMITIVES
