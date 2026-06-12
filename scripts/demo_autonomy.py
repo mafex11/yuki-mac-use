@@ -87,7 +87,7 @@ def main() -> None:
             tools = selector.select(args.goal)
             print(f"[Tool RAG] {len(tools)}/{len(BUILTIN_TOOLS)} tools: "
                   f"{[t.name for t in tools]}")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"[Tool RAG unavailable: {type(e).__name__}; using all tools]")
 
     # Mirror the live agent's message order: system, TASK, then desktop state.
@@ -113,25 +113,29 @@ def main() -> None:
 
     params = dict(tc.params or {})
     plan = str(params.get("plan", "")).strip()
+    thought = str(params.get("thought", "")).strip()
     print(f"\n[FIRST TOOL CALL] {tc.name}")
     print(json.dumps(params, indent=2)[:800])
 
-    # Score the autonomy: did it pick a sensible first action AND lay out a plan?
-    first_ok = tc.name == "app_tool" and "chrome" in json.dumps(params).lower()
+    # Goal-agnostic scoring: an intelligent first step has a real reasoning
+    # `thought` and either a non-empty `plan` (multi-step goals) or a sensible
+    # terminal answer (pure-question goals). We do NOT check for any specific
+    # app or keyword — that would just re-encode one test case.
     plan_steps = [ln for ln in plan.splitlines() if ln.strip()]
-    has_plan = len(plan_steps) >= 3
-    mentions_youtube = "youtube" in plan.lower() or "youtube" in json.dumps(params).lower()
+    has_thought = len(thought) > 10
+    has_plan = len(plan_steps) >= 2
+    is_action = tc.name != "done_tool"
 
     print("\n" + "=" * 70)
-    print(f"first action is app_tool(Chrome): {first_ok}")
-    print(f"plan has >=3 steps:              {has_plan} ({len(plan_steps)} lines)")
-    print(f"plan/goal mentions YouTube:      {mentions_youtube}")
-    if first_ok and has_plan and mentions_youtube:
-        print("\nVERDICT: ✅ INTELLIGENT — decomposed the goal into a multi-step plan")
-    elif first_ok:
-        print("\nVERDICT: ⚠️ partial — right first move but thin/absent plan")
+    print(f"emitted a reasoning thought:  {has_thought}")
+    print(f"laid out a multi-step plan:   {has_plan} ({len(plan_steps)} lines)")
+    print(f"first step is an action:      {is_action} ({tc.name})")
+    if has_thought and (has_plan or not is_action):
+        print("\nVERDICT: ✅ reasoning + decomposition present")
+    elif is_action and has_thought:
+        print("\nVERDICT: ⚠️ acts with reasoning but thin/absent plan field")
     else:
-        print("\nVERDICT: ❌ robotic — no goal decomposition")
+        print("\nVERDICT: ❌ robotic — no reasoning/decomposition")
 
 
 if __name__ == "__main__":
