@@ -8,6 +8,7 @@ import pytest
 
 from yuki.providers.factory import (
     ProviderConfigError,
+    default_thinking_budget_for,
     is_tool_call_unreliable,
     make_llm,
 )
@@ -20,6 +21,7 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("YUKI_INDEX_DB", str(tmp_path / "index.db"))
     monkeypatch.delenv("YUKI_LLM_PROVIDER", raising=False)
     monkeypatch.delenv("YUKI_LLM_MODEL", raising=False)
+    monkeypatch.delenv("YUKI_THINKING_BUDGET", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
@@ -106,3 +108,62 @@ def test_unreliable_tool_models() -> None:
     assert is_tool_call_unreliable("deepseek-r1:1.5b") is True
     assert is_tool_call_unreliable("qwen3-vl:8b") is False
     assert is_tool_call_unreliable("claude-sonnet-4-6") is False
+
+
+# --- Extended thinking defaults (Spec R, Workstream 1) ---------------------
+
+
+def test_thinking_budget_default_for_anthropic() -> None:
+    """Cloud Anthropic models get a thinking budget by default (>= 1024)."""
+    assert default_thinking_budget_for("anthropic", "claude-sonnet-4-6") >= 1024
+
+
+def test_thinking_budget_default_for_gemini_25() -> None:
+    """Gemini 2.5 models support thinking → get a budget."""
+    assert default_thinking_budget_for("google", "gemini-2.5-flash") >= 1024
+
+
+def test_no_thinking_budget_for_gemini_non_25() -> None:
+    """Older Gemini (non-2.5) doesn't support thinking → no budget."""
+    assert default_thinking_budget_for("google", "gemini-1.5-flash") is None
+
+
+def test_no_thinking_budget_for_ollama() -> None:
+    """Local models don't get thinking by default (slow/unreliable)."""
+    assert default_thinking_budget_for("ollama", "qwen2.5:7b") is None
+
+
+def test_make_llm_anthropic_enables_thinking_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """make_llm wires the default thinking budget into the Anthropic LLM."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    llm = make_llm(provider="anthropic")
+    assert llm.thinking_budget is not None
+    assert llm.thinking_budget >= 1024
+
+
+def test_make_llm_thinking_can_be_disabled_via_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """YUKI_THINKING_BUDGET=0 turns thinking off (escape hatch)."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    monkeypatch.setenv("YUKI_THINKING_BUDGET", "0")
+    llm = make_llm(provider="anthropic")
+    assert llm.thinking_budget is None
+
+
+def test_make_llm_explicit_thinking_budget_wins(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit thinking_budget kwarg overrides the default."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    llm = make_llm(provider="anthropic", thinking_budget=4096)
+    assert llm.thinking_budget == 4096
+
+
+def test_make_llm_ollama_no_thinking(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ollama path doesn't get a thinking budget injected."""
+    llm = make_llm(provider="ollama")
+    # ChatOllama has no thinking_budget attr (or it's None); either way not set.
+    assert getattr(llm, "thinking_budget", None) is None

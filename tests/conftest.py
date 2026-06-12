@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _no_keychain_prompts() -> None:
+    """Never let a test trigger the macOS Keychain GUI password prompt.
+
+    `make_llm`/`appstate.api_key_for` falls back to the `security` CLI when an
+    api key isn't in the env. Tests that scrub env keys would otherwise make
+    that CLI pop a blocking "allow access?" dialog (3x), which can't be answered
+    in an unattended run. Setting this for the whole session keeps `pytest`
+    fully non-interactive.
+    """
+    os.environ["YUKI_NO_KEYCHAIN"] = "1"
 
 
 @pytest.fixture

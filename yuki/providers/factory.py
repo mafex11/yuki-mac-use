@@ -30,6 +30,52 @@ _UNRELIABLE_TOOL_MODELS = {
     "deepseek-r1:1.5b",
 }
 
+# Default extended-thinking budget (output tokens) for cloud models. Enough to
+# plan a multi-step GUI task; small enough to keep latency/cost reasonable.
+# This is THE lever that makes Yuki reason before acting instead of obeying
+# literally one step at a time. See spec R (2026-06-13).
+_DEFAULT_THINKING_BUDGET = 2048
+
+
+def default_thinking_budget_for(provider: str, model: str) -> int | None:
+    """Thinking budget to enable by default for a (provider, model).
+
+    Cloud models that support extended thinking get a budget so the agent can
+    decompose a goal ("open a MrBeast video on YouTube in Chrome") into steps on
+    its own. Local models (Ollama) and models without thinking support get None.
+
+    - anthropic: all current Claude models support extended thinking.
+    - google: only the Gemini 2.5 series supports thinking.
+    - everything else (ollama, older Gemini): None.
+    """
+    if provider == "anthropic":
+        return _DEFAULT_THINKING_BUDGET
+    if provider == "google" and "2.5" in model:
+        return _DEFAULT_THINKING_BUDGET
+    return None
+
+
+def _resolve_thinking_budget(
+    provider: str, model: str, kwargs: dict[str, Any]
+) -> int | None:
+    """Pick the thinking budget: explicit kwarg > env override > smart default.
+
+    YUKI_THINKING_BUDGET=0 disables thinking; a positive value forces it.
+    An explicit `thinking_budget` kwarg always wins.
+    """
+    if "thinking_budget" in kwargs:
+        return kwargs.pop("thinking_budget")
+
+    env = os.environ.get("YUKI_THINKING_BUDGET")
+    if env is not None:
+        try:
+            val = int(env)
+        except ValueError:
+            val = 0
+        return val if val > 0 else None
+
+    return default_thinking_budget_for(provider, model)
+
 
 class ProviderConfigError(RuntimeError):
     """Provider misconfigured — message includes the fix."""
@@ -101,6 +147,9 @@ def make_llm(
             )
         from yuki.providers.anthropic import ChatAnthropic
 
+        budget = _resolve_thinking_budget(p, m, kwargs)
+        if budget is not None:
+            kwargs["thinking_budget"] = budget
         return ChatAnthropic(model=m, **kwargs)
 
     if p == "ollama":
@@ -116,6 +165,9 @@ def make_llm(
             )
         from yuki.providers.google import ChatGoogle
 
+        budget = _resolve_thinking_budget(p, m, kwargs)
+        if budget is not None:
+            kwargs["thinking_budget"] = budget
         return ChatGoogle(model=m, **kwargs)
 
     raise ProviderConfigError(

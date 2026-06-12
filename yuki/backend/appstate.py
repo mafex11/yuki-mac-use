@@ -78,6 +78,11 @@ def set_runtime_key(provider: str, key: str) -> None:
 def _keychain_get(account: str) -> str | None:  # pragma: no cover -- real Keychain
     if account not in _KEY_ENV:
         return None
+    # Hard escape hatch: never shell out to the `security` CLI when disabled.
+    # Tests and headless/CI runs set YUKI_NO_KEYCHAIN=1 so a missing env key
+    # can't trigger a blocking macOS "allow access?" GUI password prompt.
+    if os.environ.get("YUKI_NO_KEYCHAIN") == "1":
+        return None
     try:
         out = subprocess.run(
             ["security", "find-generic-password",
