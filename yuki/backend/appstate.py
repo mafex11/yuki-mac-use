@@ -32,6 +32,7 @@ _KEYCHAIN_SERVICE = "com.yuki.app"
 _KEY_ENV = {
     "google": "GOOGLE_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
     "ollama": "",
 }
 

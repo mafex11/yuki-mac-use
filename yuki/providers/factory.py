@@ -23,6 +23,7 @@ _DEFAULT_MODELS = {
     # on the agent eval suite (reliable tool selection), fully on-device.
     "ollama": "qwen2.5:7b",
     "google": "gemini-2.5-flash",
+    "openai": "gpt-4o",
 }
 
 # Models that may chat but unreliable for tool calls. Surfaced as a warning.
@@ -131,12 +132,16 @@ def make_llm(
     p, m = _resolve(provider, model)
 
     # Inject api keys from appstate/Keychain if not already in env
-    if p in ("google", "anthropic"):
+    if p in ("google", "anthropic", "openai"):
         from yuki.backend import appstate
 
         key = appstate.api_key_for(p)
         if key:
-            env_name = "GOOGLE_API_KEY" if p == "google" else "ANTHROPIC_API_KEY"
+            env_name = {
+                "google": "GOOGLE_API_KEY",
+                "anthropic": "ANTHROPIC_API_KEY",
+                "openai": "OPENAI_API_KEY",
+            }[p]
             os.environ.setdefault(env_name, key)
 
     if p == "anthropic":
@@ -170,8 +175,21 @@ def make_llm(
             kwargs["thinking_budget"] = budget
         return ChatGoogle(model=m, **kwargs)
 
+    if p == "openai":
+        if not os.environ.get("OPENAI_API_KEY"):
+            raise ProviderConfigError(
+                "openai selected but OPENAI_API_KEY is unset. "
+                "Get one at https://platform.openai.com/api-keys and export it."
+            )
+        from yuki.providers.openai import ChatOpenAI
+
+        # OpenAI o-series models reason natively via reasoning_effort (handled in
+        # the provider); chat models like gpt-4o don't take a thinking budget,
+        # so we don't inject one here.
+        return ChatOpenAI(model=m, **kwargs)
+
     raise ProviderConfigError(
-        f"Unknown llm_provider {p!r}. Supported: anthropic, ollama, google."
+        f"Unknown llm_provider {p!r}. Supported: anthropic, openai, google, ollama."
     )
 
 

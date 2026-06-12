@@ -25,6 +25,7 @@ def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
 
 def test_default_provider_is_google_and_errors_without_key() -> None:
@@ -81,6 +82,26 @@ def test_google_uses_gemini_api_key_fallback(
     monkeypatch.setenv("GEMINI_API_KEY", "fake")
     llm = make_llm(provider="google")
     assert llm.provider == "google"
+
+
+def test_openai_without_key_raises() -> None:
+    with pytest.raises(ProviderConfigError) as exc:
+        make_llm(provider="openai")
+    assert "OPENAI_API_KEY" in str(exc.value)
+
+
+def test_openai_with_key_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    llm = make_llm(provider="openai")
+    assert llm.provider == "openai"
+    assert llm.model_name == "gpt-4o"
+
+
+def test_openai_no_thinking_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """gpt-4o is not a thinking-budget model; no budget injected."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    llm = make_llm(provider="openai")
+    assert getattr(llm, "thinking_budget", None) is None
 
 
 def test_unknown_provider_raises() -> None:
