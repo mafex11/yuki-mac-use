@@ -137,8 +137,13 @@ class TreeState:
                         if k in node.metadata}
                 name = _clip(node.name)
             else:
-                meta = node.metadata
-                name = node.name
+                # Full mode (cloud) keeps ALL metadata keys, but still clips each
+                # field. A single terminal/editor node can carry its entire
+                # scrollback as `value` (observed: 38 Warp nodes = 1.07M chars =
+                # ~268k tokens, blowing past gpt-4o's 128k). Clip generously so
+                # cloud models keep rich context without one node flooding it.
+                meta = {k: _clip(v, limit=500) for k, v in node.metadata.items()}
+                name = _clip(node.name, limit=500)
             row = (
                 f"{idx}|{node.window_name}|{node.control_type}|{canonical}|"
                 f"{name}|{node.center.to_string()}|{focused_mark}|"

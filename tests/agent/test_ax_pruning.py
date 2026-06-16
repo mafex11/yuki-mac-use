@@ -83,17 +83,30 @@ def test_lean_mode_drops_dock_and_menubar_chrome() -> None:
     assert "Real Button" in out
 
 
-def test_full_mode_keeps_chrome_and_full_names() -> None:
-    # Full mode (cloud models) is unchanged: chrome stays, names not clipped.
-    huge = "Z" * 5_000
+def test_full_mode_keeps_chrome() -> None:
+    # Full mode (cloud models) keeps desktop chrome (Dock/menubar), unlike lean.
     nodes = [
-        _node(0, name=huge),
+        _node(0, name="x"),
         _node(1, name="Dock thing", control_type="AXDockItem"),
     ]
     ts = TreeState(interactive_nodes=nodes, status=True)
     out = ts.interactive_elements_to_string(verbosity="full")
     assert "AXDockItem" in out
-    assert huge in out             # not clipped in full mode
+
+
+def test_full_mode_clips_giant_field() -> None:
+    # A terminal/editor node can carry its ENTIRE scrollback as name/value —
+    # observed: 38 Warp nodes = 1.07M chars = ~268k tokens, blowing past gpt-4o's
+    # 128k window before step 1. Full mode must clip each field (generously),
+    # not dump it raw. (Node COUNT is small here, so hard_cap doesn't catch it —
+    # this is per-FIELD bloat.)
+    huge = "Z" * 50_000
+    nodes = [_node(0, name=huge, value=huge)]
+    ts = TreeState(interactive_nodes=nodes, status=True)
+    out = ts.interactive_elements_to_string(verbosity="full")
+    assert len(out) < 5_000        # bounded, not 100k+
+    assert "…" in out             # truncation marker
+    assert "ZZZ" in out           # start preserved
 
 
 def test_full_mode_hard_caps_huge_screens() -> None:
