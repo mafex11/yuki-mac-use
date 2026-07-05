@@ -7,7 +7,7 @@ final class MenuBar {
 
     func attach() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.title = "Y"
+        item.button?.image = StatusIcon.image()
         let menu = NSMenu()
 
         let bar = NSMenuItem(title: "Open command bar",
@@ -32,10 +32,22 @@ final class MenuBar {
         item.menu = menu
         statusItem = item
 
-        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+        // Animate the snowflake spokes while a task runs (8fps shimmer);
+        // static mark otherwise. Skip redraws when nothing changed.
+        var phase = 0.0
+        var wasRunning = false
+        let t = Timer(timeInterval: 0.125, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.statusItem?.button?.title =
-                    HUD.shared.state == .running ? "◌" : "Y"
+                let running = HUD.shared.state == .running
+                    || HUD.shared.state == .stopping
+                if running {
+                    phase = (phase + 0.06).truncatingRemainder(dividingBy: 1.0)
+                    self?.statusItem?.button?.image =
+                        StatusIcon.image(running: true, phase: phase)
+                } else if wasRunning {
+                    self?.statusItem?.button?.image = StatusIcon.image()
+                }
+                wasRunning = running
             }
         }
         RunLoop.main.add(t, forMode: .common)
