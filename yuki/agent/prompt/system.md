@@ -52,7 +52,7 @@ A native tool that errors (app not running, item not found) is not a dead end �
 
 **Tier 3 — GUI primitives:** `app_tool` (launch/switch/resize), `click_tool`, `type_tool`, `scroll_tool`, `move_tool`. The fallback for anything without a higher-tier route — clicking a specific search result, navigating a dialog, dragging. Powerful but coordinate-dependent: use only coordinates from the CURRENT Desktop State.
 
-Support tools: `done_tool` (deliver your answer — the only channel to the user), `wait_tool`, `memory_tool`, `scrape_tool` (public web pages over HTTP — logged-out; for the page the user has open use browser_tool or Visible Text), `list_app_notes`/`read_app_note` (per-app guidance from past runs).
+Support tools: `done_tool` (deliver your answer — the only channel to the user), `ask_user_tool` (ask ONE question mid-task when genuinely blocked on a decision only the user can make — ambiguous target, missing info, destructive-action confirmation; give 2-4 options when it's a choice; never ask what you can resolve from the screen, memory, or a sensible default), `wait_tool`, `memory_tool`, `scrape_tool` (public web pages over HTTP — logged-out; for the page the user has open use browser_tool or Visible Text), `list_app_notes`/`read_app_note` (per-app guidance from past runs).
 </tool_choice>
 
 <tool_use_policy>
@@ -100,8 +100,9 @@ Window and application management:
 - Dialogs, popups, Spotlight, and toasts are transient — interact or dismiss, don't treat them as apps.
 
 Text input:
+- **Target elements by row `id`, not coordinates.** `click_tool(id=N)` and `type_tool(id=N)` act on row N of the CURRENT Interactive Elements list — the element's live position is resolved at action time and the accessibility press action is used when possible, so it works even if the UI shifted. Raw `loc=[x,y]` is only for targets with no row (empty space, canvas interiors). Row ids are per-snapshot: never reuse an id from a previous step.
 - `type_tool` clicks its target itself — no separate `click_tool` first. `clear=true` replaces, `press_enter=true` submits.
-- **Coordinates MUST come from the current Desktop State** — never reuse from earlier steps, never guess. If no editable field is listed at your target, wait 0.5–1s and re-read; do not type blind.
+- If no editable field is listed at your target, wait 0.5–1s and re-read; do not type blind.
 - **`<focused_input>` is authoritative.** When present, the cursor is already there — type at those exact coords; don't hunt the element list.
 - **Use the `canonical` column** to pick rows: inputs `url_bar`/`search_field`/`primary_input`/`text_input`; buttons `submit_button`/`cancel_button`/`button`; state `checkbox`/`toggle`/`radio_button`/`popup_button`/`slider`/`tab`/`disclosure`; other `link`/`menu_item`/`image`. Canonical first, name second.
 - **Read element STATE before acting**: `checked`, `selected`, `expanded`, `value` metadata show current state. If a toggle is already `checked=true` and the goal is ON, it's done — don't click it off.

@@ -7,6 +7,9 @@ from yuki.agent.watchdog.service import WatchDog
 from yuki.agent.desktop.service import Desktop
 from yuki.agent.desktop.views import Browser
 from yuki.agent.loop import LoopGuard
+from yuki.agent.settle import SettleTracker, bounds_for
+from yuki.agent.usersense import UserSense
+from yuki.agent.interaction import InteractionHub
 from yuki.providers.events import LLMEventType
 from yuki.agent.context import Context
 from yuki.agent.base import BaseAgent
@@ -27,38 +30,6 @@ handler.setFormatter(formatter)
 logger.addHandler(handler)
 
 _NON_TOOL_PARAMS = {"thought", "evaluate", "plan"}
-
-# Settle delay (seconds) applied AFTER a tool runs and BEFORE the next AX-tree
-# refresh, to let UI animations and focus changes propagate. Ported from
-# LLM-OS windows_use/agent/service.py:546-626 settle policy. Tool names match
-# yuki.agent.tools.service. Tools not listed default to 0.0s (no extra wait).
-_POST_ACTION_SETTLE: dict[str, float] = {
-    # Strong settle: window-level changes
-    "app_tool": 1.0,           # launch/switch/resize → window animations + AX warm-up
-    # Medium settle: focus + tab/window structural changes
-    "shortcut_tool": 1.0,      # cmd+t / cmd+w / cmd+r — Chrome omnibox needs ~700ms
-    "click_tool": 0.3,         # may navigate or open modal
-    "type_tool": 0.5,          # press_enter triggers nav; allow page to start loading
-    "scroll_tool": 0.2,        # content reflows
-    "move_tool": 0.0,          # pure mouse move; no UI mutation
-    "drag_tool": 0.3,          # drop may reorder UI
-    # No settle: explicit wait or terminal/non-UI tools
-    "wait_tool": 0.0,          # already waited
-    "done_tool": 0.0,          # terminal
-    "shell_tool": 0.0,         # background shell, no UI mutation
-    "memory_tool": 0.0,
-    "scrape_tool": 0.0,
-    # Native app tools (AppleScript): app-level actions like play/open need a
-    # beat for the app to react before the next snapshot.
-    "spotify_tool": 0.5,
-    "music_tool": 0.5,
-    "browser_tool": 1.0,       # opening a URL starts a page load
-    "system_tool": 0.3,
-}
-
-
-def _settle_for(tool_name: str) -> float:
-    return _POST_ACTION_SETTLE.get(tool_name, 0.0)
 
 
 class Agent(BaseAgent):
@@ -136,6 +107,15 @@ class Agent(BaseAgent):
         # next step boundary instead of mid-action.
         self._stop_requested = False
 
+        # Event-driven settling: the watchdog stamps every AX notification;
+        # after an action we wait for the UI to quiesce instead of sleeping a
+        # fixed amount. UserSense spots hardware input the agent didn't inject
+        # (= the human took over) so the loop can pause instead of fighting.
+        self.settle_tracker = SettleTracker()
+        self.usersense = UserSense()
+        # Ask-mid-task + pause/resume channel (backend routes user replies in).
+        self.interaction = InteractionHub()
+
         self.event = Event()
         if event_subscriber is not None:
             self.event.add_subscriber(event_subscriber)
@@ -149,6 +129,43 @@ class Agent(BaseAgent):
     def request_stop(self) -> None:
         """Ask the running loop to stop at the next step boundary."""
         self._stop_requested = True
+        # Unblock a parked ask/pause so the stop lands immediately.
+        self.interaction.cancel_question()
+        self.interaction.resume()
+
+    def _maybe_pause_for_user(self, step: int) -> bool:
+        """Park while the human is driving. False = stop was requested."""
+        if step == 0 or not self.usersense.user_intervened():
+            return True
+        self.event.emit(AgentEvent(type=EventType.PAUSED, data={
+            "step": step,
+            "reason": "You took over the mouse/keyboard — paused.",
+        }))
+        self.interaction.begin_pause()
+        resumed = self.interaction.wait_resume_sync(
+            should_abort=lambda: self._stop_requested
+        )
+        if not resumed:
+            return False
+        self.usersense.mark_agent_action()  # forgive input made during pause
+        self.event.emit(AgentEvent(type=EventType.RESUMED, data={"step": step}))
+        return True
+
+    def _handle_ask_user(self, step: int, params: dict) -> str:
+        """Block on the interaction hub until the user answers (or stops)."""
+        question = str(params.get("question") or "").strip()
+        options = params.get("options") or []
+        self.interaction.begin_question(question)
+        self.event.emit(AgentEvent(type=EventType.ASK, data={
+            "step": step, "question": question, "options": options,
+        }))
+        answer = self.interaction.wait_answer_sync(timeout=300.0)
+        if answer is None:
+            return ("The user did not answer (question dismissed or timed out). "
+                    "Proceed with the most reasonable default and mention the "
+                    "choice in your final answer, or finish with done_tool if "
+                    "you cannot proceed safely.")
+        return f"The user answered: {answer}"
 
     def _stopped_result(self) -> AgentResult:
         self.event.emit(
@@ -198,6 +215,8 @@ class Agent(BaseAgent):
         for step in range(self.state.max_steps):
             self.state.step = step
             if self._stop_requested:
+                return self._stopped_result()
+            if not self._maybe_pause_for_user(step):
                 return self._stopped_result()
 
             # Snapshot FIRST so change detection can diff against the previous
@@ -349,15 +368,27 @@ class Agent(BaseAgent):
                 )
 
             # Act
-            tool_result = self.registry.execute(tool_name=tool_name, tool_params=tool_params, desktop=self.desktop)
+            if tool_name == "ask_user_tool":
+                from yuki.agent.registry.views import ToolResult
+                answer_text = self._handle_ask_user(step, tool_params)
+                if self._stop_requested:
+                    return self._stopped_result()
+                tool_result = ToolResult(is_success=True, content=answer_text)
+            else:
+                self.usersense.mark_agent_action()
+                tool_result = self.registry.execute(tool_name=tool_name, tool_params=tool_params, desktop=self.desktop)
+            self.usersense.mark_agent_action()
 
             self._loop_guard.record_action(tool_name, tool_params, tool_result.is_success)
 
-            # Smart settle: let UI animations finish before the next state capture.
-            # Per-tool delays are in _POST_ACTION_SETTLE.
-            settle = _settle_for(tool_name) if tool_result.is_success else 0.0
-            if settle > 0.0 and tool_name != "done_tool":
-                time.sleep(settle)
+            # Event-driven settle: wait until AX notifications quiesce (min/max
+            # bounds per tool) instead of a fixed sleep. Falls back to the old
+            # fixed sleep when the watchdog produced no signal this run.
+            settle = 0.0
+            if tool_result.is_success and tool_name != "done_tool":
+                min_w, max_w = bounds_for(tool_name)
+                if max_w > 0.0:
+                    settle = self.settle_tracker.settle(min_w, max_w)
 
             # Both outcomes go into the MAIN history so the model sees actions
             # and their failures in chronological order. (Failures used to go
@@ -422,6 +453,10 @@ class Agent(BaseAgent):
         try:
             with self.desktop.auto_minimize() if self.auto_minimize else nullcontext():
                 self.watchdog.set_focus_callback(self.desktop.tree.on_focus_changed)
+                # Structure/property notifications feed the settle tracker so
+                # post-action waits end as soon as the UI actually quiesces.
+                self.watchdog.set_structure_callback(self.settle_tracker.notify)
+                self.watchdog.set_property_callback(self.settle_tracker.notify)
                 with self.watchdog:
                     result = self.loop()
             return result
@@ -442,6 +477,8 @@ class Agent(BaseAgent):
         for step in range(self.state.max_steps):
             self.state.step = step
             if self._stop_requested:
+                return self._stopped_result()
+            if not self._maybe_pause_for_user(step):
                 return self._stopped_result()
 
             # Snapshot FIRST so change detection can diff against the previous
@@ -591,14 +628,27 @@ class Agent(BaseAgent):
                     )
                 )
 
-            tool_result = await self.registry.aexecute(tool_name=tool_name, tool_params=tool_params, desktop=self.desktop)
+            if tool_name == "ask_user_tool":
+                from yuki.agent.registry.views import ToolResult
+                answer_text = await asyncio.to_thread(self._handle_ask_user, step, tool_params)
+                if self._stop_requested:
+                    return self._stopped_result()
+                tool_result = ToolResult(is_success=True, content=answer_text)
+            else:
+                self.usersense.mark_agent_action()
+                tool_result = await self.registry.aexecute(tool_name=tool_name, tool_params=tool_params, desktop=self.desktop)
+            self.usersense.mark_agent_action()
 
             self._loop_guard.record_action(tool_name, tool_params, tool_result.is_success)
 
-            # Smart settle: let UI animations finish before the next state capture.
-            settle = _settle_for(tool_name) if tool_result.is_success else 0.0
-            if settle > 0.0 and tool_name != "done_tool":
-                await asyncio.sleep(settle)
+            # Event-driven settle (async): same bounds, off-loop-friendly wait.
+            settle = 0.0
+            if tool_result.is_success and tool_name != "done_tool":
+                min_w, max_w = bounds_for(tool_name)
+                if max_w > 0.0:
+                    settle = await asyncio.to_thread(
+                        self.settle_tracker.settle, min_w, max_w
+                    )
 
             # Both outcomes go into the MAIN history so the model sees actions
             # and their failures in chronological order. (Failures used to go
@@ -663,6 +713,10 @@ class Agent(BaseAgent):
         try:
             with self.desktop.auto_minimize() if self.auto_minimize else nullcontext():
                 self.watchdog.set_focus_callback(self.desktop.tree.on_focus_changed)
+                # Structure/property notifications feed the settle tracker so
+                # post-action waits end as soon as the UI actually quiesces.
+                self.watchdog.set_structure_callback(self.settle_tracker.notify)
+                self.watchdog.set_property_callback(self.settle_tracker.notify)
                 with self.watchdog:
                     result = await self.aloop()
             return result
