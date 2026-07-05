@@ -201,7 +201,40 @@ async def _stream_control(
     rec.record({"type": "user", "text": message})
 
     hot = load_hot_context(rt.vault).strip()
+
+    # Task-relevant memory (people, projects, routines, knowledge) — the
+    # person note for "mom", the project the user names, etc. Never raises.
+    try:
+        from yuki.memory import retrieve_task_context
+
+        memory_ctx = retrieve_task_context(rt.vault, message)
+    except Exception:
+        memory_ctx = ""
+
+    # Recent conversation so follow-ups work ("actually skip this song"
+    # right after "play my playlist"). Last few turns, clipped — the agent
+    # needs the gist, not the transcript.
+    recent = ""
+    try:
+        from yuki.runtime.compaction import load_history
+
+        turns = load_history()[-6:]
+        if turns:
+            lines = []
+            for m in turns:
+                role = "user" if type(m).__name__ == "HumanMessage" else "yuki"
+                text = (m.content or "").strip().replace("\n", " ")
+                if text:
+                    lines.append(f"{role}: {text[:200]}")
+            if lines:
+                recent = "<recent_conversation>\n" + "\n".join(lines) + "\n</recent_conversation>"
+    except Exception:
+        recent = ""
+
+    extra = "\n\n".join(p for p in (memory_ctx, recent) if p)
     framed = _frame_user_task(message, hot)
+    if extra:
+        framed = f"{extra}\n\n{framed}"
 
     try:
         llm = make_llm()
@@ -333,6 +366,20 @@ async def _stream_control(
     except Exception:
         pass
 
+    # Control turns join the shared conversation history so a follow-up in
+    # chat OR a next control task knows what just happened.
+    if outcome == "success" and content:
+        try:
+            from yuki.messages import AIMessage, HumanMessage
+            from yuki.runtime.compaction import append_history
+
+            append_history([
+                HumanMessage(content=message),
+                AIMessage(content=content),
+            ])
+        except Exception as e:
+            log.warning("control history append failed: %s", e)
+
     final = {
         "type": "cancelled" if outcome == "cancelled" else "done",
         "content": content,
@@ -382,6 +429,35 @@ async def post_chat_control_cancel() -> dict[str, bool]:
         return {"cancelled": True}
     except Exception:
         return {"cancelled": False}
+
+
+class AnswerRequest(BaseModel):
+    answer: str
+
+
+@router.post("/control/answer")
+async def post_chat_control_answer(req: AnswerRequest) -> dict[str, bool]:
+    """Deliver the user's reply to a pending ask_user_tool question."""
+    agent = _ACTIVE_CONTROL_AGENT
+    if agent is None:
+        return {"delivered": False}
+    try:
+        return {"delivered": bool(agent.interaction.answer(req.answer))}
+    except Exception:
+        return {"delivered": False}
+
+
+@router.post("/control/resume")
+async def post_chat_control_resume() -> dict[str, bool]:
+    """Resume a task paused because the user took over the mouse/keyboard."""
+    agent = _ACTIVE_CONTROL_AGENT
+    if agent is None:
+        return {"resumed": False}
+    try:
+        agent.interaction.resume()
+        return {"resumed": True}
+    except Exception:
+        return {"resumed": False}
 
 
 @router.post("/compact")
