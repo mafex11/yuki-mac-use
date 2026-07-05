@@ -1,7 +1,7 @@
 [tool.briefcase]
 project_name = "Yuki"
 bundle = "com.yuki"
-version = "0.5.0"
+version = "0.5.1"
 url = "https://github.com/sudhanshu/yuki"
 license = "MIT"
 author = "Sudhanshu Pandit"
