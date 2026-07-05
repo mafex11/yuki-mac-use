@@ -1,51 +1,137 @@
 import AppKit
 import SwiftUI
 
+/// The activity pill: a small floating overlay that shows what the agent is
+/// doing while it drives the Mac, with a Stop button. The command bar closes
+/// when a task starts; this pill is the task's face until it finishes.
 @MainActor
 final class HUD: ObservableObject {
     static let shared = HUD()
     private var panel: NSPanel?
 
-    @Published var line = ""
+    @Published var task = ""            // what the user asked, shown as title
+    @Published var line = ""            // current step, human phrasing
+    @Published var step = 0
+    @Published var maxSteps = 0
     @Published var state: State = .idle
+    @Published var resultPreview = ""   // first lines of the final answer
     @Published var queuedPreview: String? = nil
-    enum State: Equatable { case idle, running, success, failure }
-
-    private static let verbMap: [String: String] = [
-        "app_tool": "Switching to", "click_tool": "Clicking",
-        "type_tool": "Typing", "shortcut_tool": "Pressing",
-        "shell_tool": "Running", "scroll_tool": "Scrolling",
-        "scrape_tool": "Reading", "wait_tool": "Waiting",
-        "list_app_notes": "Checking app notes", "read_app_note": "Reading guidance",
-    ]
+    enum State: Equatable { case idle, running, stopping, success, failure, cancelled }
 
     func begin(task: String) {
+        self.task = task
         state = .running
-        line = "Starting…"
+        line = "Figuring out the steps…"
+        step = 0
+        maxSteps = 0
+        resultPreview = ""
         show()
     }
 
     func setQueued(preview: String) { queuedPreview = preview }
     func clearQueued() { queuedPreview = nil }
 
+    func requestStop() {
+        guard state == .running else { return }
+        state = .stopping
+        line = "Stopping after this step…"
+        Task { await Backend.shared.cancelControl() }
+    }
+
+    func dismiss() {
+        panel?.orderOut(nil)
+        state = .idle
+    }
+
     func handle(event o: [String: Any]) {
         guard let type = o["type"] as? String else { return }
         switch type {
+        case "state":
+            step = (o["step"] as? Int ?? 0) + 1
+            maxSteps = o["max_steps"] as? Int ?? 0
         case "tool_call":
+            guard state == .running else { break }  // keep "Stopping…" sticky
             let tool = o["tool_name"] as? String ?? ""
-            let verb = Self.verbMap[tool] ?? tool
-            line = verb
+            let params = o["tool_params"] as? [String: Any] ?? [:]
+            line = Self.friendly(tool: tool, params: params)
         case "done":
             state = .success
             let content = (o["content"] as? String ?? "Done")
-            line = String(content.prefix(120))
-            fadeAfter(5)
+            resultPreview = String(content.prefix(160))
+            line = "Done"
+            fadeAfter(6)
+        case "cancelled":
+            state = .cancelled
+            line = "Stopped"
+            resultPreview = ""
+            fadeAfter(3)
         case "error":
+            // While stopping, the agent emits "Stopped by user" as an error
+            // before the final cancelled event — don't flash red for that.
+            guard state != .stopping else { break }
             state = .failure
-            line = o["error"] as? String ?? "Failed"
-            // sticky — no auto-fade
+            line = String((o["error"] as? String ?? o["content"] as? String ?? "Failed").prefix(160))
+            // sticky — dismiss via the ✕ button
         default:
             break
+        }
+    }
+
+    /// Human phrasing for a tool call — what a person would say they're doing.
+    static func friendly(tool: String, params: [String: Any]) -> String {
+        func str(_ key: String) -> String { (params[key] as? String) ?? "" }
+        switch tool {
+        case "app_tool":
+            let name = str("name")
+            return name.isEmpty ? "Switching apps" : "Opening \(name)"
+        case "type_tool":
+            let text = str("text")
+            return text.isEmpty ? "Typing" : "Typing “\(text.prefix(30))”"
+        case "click_tool":
+            return "Clicking"
+        case "scroll_tool":
+            return "Scrolling"
+        case "shortcut_tool":
+            let keys = str("shortcut")
+            return keys.isEmpty ? "Pressing keys"
+                : "Pressing \(keys.replacingOccurrences(of: "cmd", with: "⌘"))"
+        case "shell_tool":
+            return str("mode") == "osascript" ? "Talking to an app" : "Running a command"
+        case "wait_tool":
+            return "Waiting for the screen"
+        case "scrape_tool":
+            return "Reading a page"
+        case "memory_tool":
+            return "Taking notes"
+        case "list_app_notes", "read_app_note":
+            return "Recalling how this app works"
+        case "spotify_tool", "music_tool":
+            let action = str("action")
+            let app = tool == "spotify_tool" ? "Spotify" : "Music"
+            switch action {
+            case "play": return "Pressing play in \(app)"
+            case "pause": return "Pausing \(app)"
+            case "search": return "Searching \(app)"
+            case "play_uri": return "Starting playback in \(app)"
+            case "now_playing": return "Checking what's playing"
+            default: return "Controlling \(app)"
+            }
+        case "browser_tool":
+            return str("action") == "open_url" ? "Opening a page" : "Checking the browser"
+        case "mail_tool": return "Working in Mail"
+        case "messages_tool": return "Working in Messages"
+        case "notes_tool": return "Working in Notes"
+        case "calendar_tool": return "Checking the calendar"
+        case "reminders_tool": return "Updating reminders"
+        case "clipboard_tool": return "Using the clipboard"
+        case "screenshot_tool": return "Taking a screenshot"
+        case "web_search_tool": return "Searching the web"
+        case "system_tool": return "Adjusting system settings"
+        case "contacts_tool": return "Looking up a contact"
+        case "shortcuts_tool": return "Running a Shortcut"
+        default:
+            return tool.replacingOccurrences(of: "_tool", with: "")
+                .replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
 
@@ -56,9 +142,10 @@ final class HUD: ObservableObject {
     }
 
     private func fadeAfter(_ secs: Double) {
+        let settled = state
         Task {
             try? await Task.sleep(nanoseconds: UInt64(secs * 1_000_000_000))
-            if state == .success {
+            if state == settled {
                 panel?.orderOut(nil)
                 state = .idle
             }
@@ -67,21 +154,17 @@ final class HUD: ObservableObject {
 
     private func build() {
         let p = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 300, height: 80),
+            contentRect: NSRect(x: 0, y: 0, width: 340, height: 96),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false)
         p.level = .floating
         p.isOpaque = false
         p.backgroundColor = .clear
         p.hasShadow = true
-        // Pure passive overlay while the agent drives other apps:
-        // - ignoresMouseEvents: clicks pass straight through to the app behind
-        //   it, so the pill never intercepts a click the agent aimed elsewhere.
-        // - nonactivating + never-key: it never steals focus from the app the
-        //   agent is controlling.
-        // - canJoinAllSpaces + stationary: stays visible as the agent switches
-        //   apps/spaces, without itself becoming the focused window.
-        p.ignoresMouseEvents = true
+        // The pill accepts clicks (Stop / dismiss) but never becomes key, so
+        // it can't steal focus from the app the agent is driving. It sits in
+        // a screen corner where agent clicks are very unlikely to land.
+        p.ignoresMouseEvents = false
         p.hidesOnDeactivate = false
         p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         p.contentView = NSHostingView(rootView: HUDView(hud: self))
@@ -93,8 +176,8 @@ final class HUD: ObservableObject {
         let f = s.visibleFrame
         let corner = UserDefaults.standard.string(forKey: "yuki.hudCorner") ?? "top-right"
         let m: CGFloat = 16
-        let w: CGFloat = 300
-        let h: CGFloat = 80
+        let w: CGFloat = 340
+        let h: CGFloat = 96
         let x: CGFloat
         let y: CGFloat
         switch corner {
@@ -111,28 +194,93 @@ struct HUDView: View {
     @ObservedObject var hud: HUD
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
                 icon
-                Text(hud.line).font(.callout).lineLimit(2)
-                Spacer()
+                Text(title)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                trailingButton
+            }
+            if !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            if hud.state == .running || hud.state == .stopping, hud.maxSteps > 0 {
+                ProgressView(value: Double(min(hud.step, hud.maxSteps)),
+                             total: Double(hud.maxSteps))
+                    .progressViewStyle(.linear)
+                    .controlSize(.small)
+                    .tint(hud.state == .stopping ? .orange : .accentColor)
             }
             if let next = hud.queuedPreview {
-                Text("next: \(next)").font(.caption2).foregroundStyle(.secondary)
+                Text("next: \(next)").font(.caption2).foregroundStyle(.tertiary)
                     .lineLimit(1)
             }
         }
         .padding(12)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .frame(width: 300)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .frame(width: 340)
+    }
+
+    private var title: String {
+        switch hud.state {
+        case .success: return "Done"
+        case .failure: return "Couldn't finish"
+        case .cancelled: return "Stopped"
+        case .stopping: return "Stopping…"
+        default: return hud.task.isEmpty ? "Working…" : hud.task
+        }
+    }
+
+    private var subtitle: String {
+        switch hud.state {
+        case .success: return hud.resultPreview
+        case .failure: return hud.line
+        case .running, .stopping:
+            let steps = hud.maxSteps > 0 ? "  ·  step \(hud.step)/\(hud.maxSteps)" : ""
+            return hud.line + steps
+        default: return ""
+        }
     }
 
     @ViewBuilder private var icon: some View {
         switch hud.state {
-        case .running: ProgressView().controlSize(.small)
+        case .running, .stopping: ProgressView().controlSize(.small)
         case .success: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
         case .failure: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+        case .cancelled: Image(systemName: "stop.circle.fill").foregroundStyle(.orange)
         case .idle: EmptyView()
+        }
+    }
+
+    @ViewBuilder private var trailingButton: some View {
+        switch hud.state {
+        case .running:
+            Button {
+                hud.requestStop()
+            } label: {
+                Label("Stop", systemImage: "stop.fill")
+                    .font(.caption.weight(.semibold))
+                    .labelStyle(.titleAndIcon)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(.red)
+        case .failure, .success, .cancelled:
+            Button {
+                hud.dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption2.weight(.bold))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
+        default:
+            EmptyView()
         }
     }
 }

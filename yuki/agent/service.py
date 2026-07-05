@@ -131,6 +131,11 @@ class Agent(BaseAgent):
         # AX-tree verbosity: "lean" for small/local models, "full" otherwise.
         self.ax_verbosity = "full"
 
+        # Cooperative cancellation: request_stop() (e.g. from the HUD stop
+        # button via /chat/control/cancel) makes the loop exit cleanly at the
+        # next step boundary instead of mid-action.
+        self._stop_requested = False
+
         self.event = Event()
         if event_subscriber is not None:
             self.event.add_subscriber(event_subscriber)
@@ -140,6 +145,19 @@ class Agent(BaseAgent):
             self.event.add_subscriber(FileEventSubscriber())
 
         self._cached_system_message: SystemMessage | None = None
+
+    def request_stop(self) -> None:
+        """Ask the running loop to stop at the next step boundary."""
+        self._stop_requested = True
+
+    def _stopped_result(self) -> AgentResult:
+        self.event.emit(
+            AgentEvent(
+                type=EventType.ERROR,
+                data={"step": self.state.step, "error": "Stopped by user."},
+            )
+        )
+        return AgentResult(is_done=False, error="cancelled")
 
     @property
     def system_message(self) -> SystemMessage:
@@ -179,6 +197,8 @@ class Agent(BaseAgent):
 
         for step in range(self.state.max_steps):
             self.state.step = step
+            if self._stop_requested:
+                return self._stopped_result()
 
             # Snapshot FIRST so change detection can diff against the previous
             # step before the prompt is built from this same snapshot.
@@ -397,6 +417,7 @@ class Agent(BaseAgent):
 
     def invoke(self, task: str) -> AgentResult:
         self.state.reset()
+        self._stop_requested = False
         self.state.task = task
         try:
             with self.desktop.auto_minimize() if self.auto_minimize else nullcontext():
@@ -420,6 +441,8 @@ class Agent(BaseAgent):
 
         for step in range(self.state.max_steps):
             self.state.step = step
+            if self._stop_requested:
+                return self._stopped_result()
 
             # Snapshot FIRST so change detection can diff against the previous
             # step before the prompt is built from this same snapshot.
@@ -635,6 +658,7 @@ class Agent(BaseAgent):
 
     async def ainvoke(self, task: str) -> AgentResult:
         self.state.reset()
+        self._stop_requested = False
         self.state.task = task
         try:
             with self.desktop.auto_minimize() if self.auto_minimize else nullcontext():

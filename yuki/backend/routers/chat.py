@@ -25,9 +25,17 @@ from yuki.backend.trajectory import TrajectoryRecorder
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
+# The one live control agent (a single desktop can only run one control task
+# at a time). POST /chat/control/cancel flips its stop flag; the loop exits
+# at the next step boundary.
+_ACTIVE_CONTROL_AGENT: Any = None
+
 _BASE_SYSTEM_PROMPT = (
     "You are Yuki, a helpful macOS-resident assistant. "
-    "Reply directly and concisely. If the user asks a factual question, "
+    "Reply directly and concisely. Your replies render in a compact command "
+    "bar: plain sentences and simple '-' lists only. Inline **bold** and "
+    "`code` are fine; NEVER use markdown headers (#) or tables. "
+    "If the user asks a factual question, "
     "answer it. If they ask you to do something on their Mac, tell them to "
     "use /chat/control instead — that surface has accessibility access. "
     "If the user states a durable personal fact about themselves, their "
@@ -233,6 +241,9 @@ async def _stream_control(
                   event_subscriber=QueueEventSubscriber(queue))
     _configure_agent_for_model(agent, llm)
 
+    global _ACTIVE_CONTROL_AGENT
+    _ACTIVE_CONTROL_AGENT = agent
+
     foreground_bundle = ""
     try:
         win = agent.desktop.get_foreground_window()
@@ -269,6 +280,7 @@ async def _stream_control(
                         yield ev_sse
                     break
     finally:
+        _ACTIVE_CONTROL_AGENT = None
         if not task.done():
             task.cancel()
             try:
@@ -284,7 +296,10 @@ async def _stream_control(
         try:
             result = task.result()
             content = getattr(result, "content", "") or ""
-            if not getattr(result, "is_done", True):
+            if getattr(result, "error", "") == "cancelled":
+                outcome = "cancelled"
+                content = "Stopped."
+            elif not getattr(result, "is_done", True):
                 outcome = "failure"
                 failure_mode = FailureMode.AGENT_STEP_LIMIT
         except Exception as e:
@@ -318,7 +333,10 @@ async def _stream_control(
     except Exception:
         pass
 
-    final = {"type": "done", "content": content}
+    final = {
+        "type": "cancelled" if outcome == "cancelled" else "done",
+        "content": content,
+    }
     rec.record(final)
     yield final
 
@@ -351,6 +369,19 @@ async def post_chat_control(req: ChatRequest) -> Any:
         raise HTTPException(status_code=400, detail="empty message")
     events = _stream_control(req.message, req.conversation_id)
     return EventSourceResponse(_to_sse(events))
+
+
+@router.post("/control/cancel")
+async def post_chat_control_cancel() -> dict[str, bool]:
+    """Stop the running control task at its next step boundary."""
+    agent = _ACTIVE_CONTROL_AGENT
+    if agent is None:
+        return {"cancelled": False}
+    try:
+        agent.request_stop()
+        return {"cancelled": True}
+    except Exception:
+        return {"cancelled": False}
 
 
 @router.post("/compact")

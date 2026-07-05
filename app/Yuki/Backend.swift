@@ -309,4 +309,10 @@ final class Backend {
             }, onDone: { cont.resume() })
         }
     }
+
+    /// Ask the backend to stop the running control task at its next step.
+    func cancelControl() async {
+        _ = try? await client.postJSON(
+            path: "/chat/control/cancel", body: Data("{}".utf8))
+    }
 }

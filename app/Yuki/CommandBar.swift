@@ -20,10 +20,9 @@ final class CommandBar {
     private var panel: NSPanel?
     private var clickMonitor: Any?
 
-    /// True while a control task is streaming into the bar. Suppresses
-    /// click-outside dismissal so the agent driving OTHER apps (which the
-    /// global monitor would otherwise see as an outside click) can't close
-    /// the bar mid-task.
+    /// Legacy flag from when control tasks streamed inside the bar. The bar
+    /// now closes on control submit (the HUD pill takes over), so this stays
+    /// false; kept so the click-outside monitor logic reads clearly.
     var isRunningControl = false
 
     static let focusRequest = Notification.Name("yuki.commandbar.focus")
@@ -110,12 +109,17 @@ struct CommandBarView: View {
         let text: String
     }
 
-    private static let verbMap: [String: String] = [
-        "app_tool": "Switching app", "click_tool": "Clicking",
-        "type_tool": "Typing", "shortcut_tool": "Pressing keys",
-        "shell_tool": "Running", "scroll_tool": "Scrolling",
-        "scrape_tool": "Reading screen", "wait_tool": "Waiting",
-    ]
+    /// Render markdown (bold/italic/code/links) while preserving line breaks.
+    /// Falls back to plain text if parsing fails.
+    static func rendered(_ text: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: text,
+            options: .init(
+                allowsExtendedAttributes: false,
+                interpretedSyntax: .inlineOnlyPreservingWhitespace,
+                failurePolicy: .returnPartiallyParsedIfPossible))
+        ) ?? AttributedString(text)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -124,12 +128,18 @@ struct CommandBarView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
                         ForEach(history) { turn in
-                            Text(turn.role == "human" ? "❯ \(turn.text)" : turn.text)
-                                .font(.callout)
-                                .textSelection(.enabled)
-                                .foregroundStyle(color(for: turn.role))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .id(turn.id)
+                            Group {
+                                if turn.role == "human" {
+                                    Text("❯ \(turn.text)")
+                                } else {
+                                    Text(Self.rendered(turn.text))
+                                }
+                            }
+                            .font(.callout)
+                            .textSelection(.enabled)
+                            .foregroundStyle(color(for: turn.role))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .id(turn.id)
                         }
                         if let activity = liveActivity {
                             HStack(spacing: 8) {
@@ -250,25 +260,36 @@ struct CommandBarView: View {
         busy = true
         let decision = await Backend.shared.route(msg)
         if decision == "control" {
-            CommandBar.shared.isRunningControl = true
-            liveActivity = "Working on it…"
+            // One desktop, one driver: refuse a second control task while one
+            // is still moving the mouse. Stop it from the pill first.
+            if HUD.shared.state == .running || HUD.shared.state == .stopping {
+                history.append(Turn(role: "ai",
+                    text: "I'm still working on the last task — hit Stop on the pill (top corner) if you want me to drop it."))
+                busy = false
+                inputFocused = true
+                return
+            }
+            // Get out of the way: the bar closes, the activity pill (HUD)
+            // shows progress + Stop while the agent drives the Mac. The
+            // result lands back in this history for the next bar open.
+            HUD.shared.begin(task: msg)
+            CommandBar.shared.close()
+            busy = false
             await Backend.shared.runControlInBar(msg) { ev in
-                let type = ev["type"] as? String
-                if type == "tool_call" {
-                    let tool = ev["tool_name"] as? String ?? ""
-                    liveActivity = "Working on it — \(Self.verbMap[tool] ?? tool)…"
-                } else if type == "done" {
-                    let content = ev["content"] as? String ?? "Done."
-                    history.append(Turn(role: "ai", text: content))
-                    liveActivity = nil
-                } else if type == "error" {
-                    let content = ev["content"] as? String ?? "Failed."
-                    history.append(Turn(role: "error", text: content))
-                    liveActivity = nil
+                switch ev["type"] as? String {
+                case "done":
+                    history.append(Turn(role: "ai",
+                        text: ev["content"] as? String ?? "Done."))
+                case "cancelled":
+                    history.append(Turn(role: "ai", text: "Stopped that task."))
+                case "error":
+                    history.append(Turn(role: "error",
+                        text: ev["content"] as? String
+                            ?? ev["error"] as? String ?? "Failed."))
+                default:
+                    break
                 }
             }
-            liveActivity = nil
-            CommandBar.shared.isRunningControl = false
         } else {
             liveActivity = "Thinking…"
             let (reply, badge, capture) = await Backend.shared.chat(msg)
@@ -278,8 +299,8 @@ struct CommandBarView: View {
             if askBeforeRemember, let capture = capture, !capture.isEmpty {
                 pendingCapture = capture
             }
+            busy = false
         }
-        busy = false
         inputFocused = true   // persistent focus after every response
     }
 
