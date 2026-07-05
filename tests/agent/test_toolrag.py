@@ -20,7 +20,7 @@ def _tools() -> list[Tool]:
         mk("shortcut_tool", "Press a keyboard shortcut"),
         mk("wait_tool", "Wait for the UI to settle"),
         mk("memory_tool", "Persist data across steps"),
-        mk("desktop_tool", "Manage virtual desktops"),
+        mk("spotify_tool", "Control Spotify playback"),
     ]
 
 # The GUI primitives every multi-step task needs — must survive Tool RAG.

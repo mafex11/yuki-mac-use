@@ -15,6 +15,7 @@ from yuki.tools.native import (  # noqa: F401
     reminders_tool,
     screenshot_tool,
     shortcuts_tool,
+    spotify_tool,
     system_tool,
     web_search_tool,
 )

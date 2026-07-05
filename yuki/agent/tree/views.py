@@ -25,6 +25,41 @@ class TreeState:
     interactive_nodes:list['TreeElementNode']|None=field(default_factory=list)
     scrollable_nodes:list['ScrollElementNode']|None=field(default_factory=list)
     dom_informative_nodes:list['TextElementNode']|None=field(default_factory=list)
+    # Non-empty when the active app exposed no (or suspiciously few) AX
+    # elements — canvas UI, slow app, or a timed-out walk. Rendered
+    # prominently so the model doesn't treat an empty list as ground truth.
+    ax_warning:str=''
+
+    def visible_text_to_string(self, verbosity: str = "full") -> str:
+        """Visible on-screen text (AXStaticText/AXHeading), reading order.
+
+        This is what the screen SAYS, as opposed to what can be clicked.
+        Sorted top-to-bottom then left-to-right; consecutive duplicates
+        dropped; capped per verbosity with an explicit truncation note.
+        """
+        if not self.dom_informative_nodes:
+            return "No visible text captured."
+        nodes = sorted(
+            self.dom_informative_nodes,
+            key=lambda n: (n.center.y if n.center else 0, n.center.x if n.center else 0),
+        )
+        max_lines = 40 if verbosity == "lean" else 120
+        lines: list[str] = []
+        prev = None
+        for node in nodes:
+            text = _clip(node.text, limit=200)
+            if text == prev:
+                continue
+            prev = text
+            lines.append(text)
+        total = len(lines)
+        if total > max_lines:
+            lines = lines[:max_lines]
+            lines.append(
+                f"...[{total - max_lines} more text lines truncated — scroll or "
+                f"focus the relevant window to see more]"
+            )
+        return "\n".join(lines)
 
     def interactive_elements_to_string(
         self,
@@ -272,5 +307,7 @@ class ScrollElementNode:
 @dataclass
 class TextElementNode:
     text:str
+    center:Optional['Center']=None
+    window_name:str=''
 
 ElementNode=TreeElementNode|ScrollElementNode|TextElementNode

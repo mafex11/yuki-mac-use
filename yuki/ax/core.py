@@ -498,6 +498,8 @@ _LATE_TRAVERSAL_ATTRIBUTES = [
     Attribute.URL,
     Attribute.Filename,
     Attribute.Expanded,
+    Attribute.Selected,
+    Attribute.Focused,
 ]
 
 _TRAVERSAL_ATTRIBUTES = _EARLY_TRAVERSAL_ATTRIBUTES + _LATE_TRAVERSAL_ATTRIBUTES
@@ -552,6 +554,8 @@ def GetLateTraversalBatch(element: Any) -> dict:
         'url': str(url) if url is not None else None,
         'filename': str(filename) if filename is not None else None,
         'expanded': raw.get(Attribute.Expanded) is True,
+        'selected': raw.get(Attribute.Selected) is True,
+        'ax_focused': raw.get(Attribute.Focused) is True,
         'label': label,
     }
 

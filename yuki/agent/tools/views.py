@@ -148,25 +148,6 @@ class Type(SharedBaseModel):
         examples=[True, False]
     )
 
-class MultiSelect(SharedBaseModel):
-    press_ctrl: bool = Field(
-        description="If true, holds the Command (⌘) key while clicking each element to accumulate a multi-selection (files, checkboxes, list items). If false, clicks each location sequentially without Command.",
-        default=False,
-        examples=[True, False]
-    )
-    elements: list[list[int]] = Field(
-        ...,
-        description="List of [x, y] pixel coordinates to click. Each coordinate pair is clicked in order.",
-        examples=[[[640, 360], [800, 400]], [[100, 200], [200, 300]]]
-    )
-
-class MultiEdit(SharedBaseModel):
-    elements: list[list] = Field(
-        ...,
-        description="List of [x, y, text] entries. For each entry, clicks the location (x, y) and types the text. Use to fill multiple form fields in one action.",
-        examples=[[[640, 360, 'hello'], [800, 400, 'world']], [[100, 200, 'John'], [200, 300, 'Doe']]]
-    )
-
 class Scroll(SharedBaseModel):
     loc: Optional[list[int]] = Field(
         description="[x, y] pixel coordinates where scrolling occurs. If omitted, scrolls at the current cursor position.",
@@ -220,23 +201,6 @@ class Scrape(SharedBaseModel):
         ...,
         description="URL of the webpage currently open in the browser. The tool extracts visible text content from the rendered page via the accessibility tree and returns it as markdown.",
         examples=['https://google.com', 'https://example.com/page']
-    )
-
-class Desktop(SharedBaseModel):
-    action: Literal['create', 'remove', 'rename', 'switch'] = Field(
-        ...,
-        description="Virtual desktop action: 'create' adds a new desktop, 'remove' deletes a desktop by name, 'rename' changes a desktop's name, 'switch' activates a desktop by name",
-        examples=['create', 'switch', 'rename', 'remove']
-    )
-    desktop_name: Optional[str] = Field(
-        description="Name of the target desktop. Required for remove, rename, and switch. Optional for create (auto-named if omitted).",
-        default=None,
-        examples=["Desktop 1", "Work", "Research"]
-    )
-    new_name: Optional[str] = Field(
-        description="New name for the desktop. Required for rename only.",
-        default=None,
-        examples=["My Workspace", "Project Alpha"]
     )
 
 class ListAppNotes(SharedBaseModel):

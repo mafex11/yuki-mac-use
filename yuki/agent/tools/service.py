@@ -1,4 +1,4 @@
-from yuki.agent.tools.views import Click, Type, Scroll, Move, Shortcut, Wait, Scrape, Done, Shell, Memory, App, MultiSelect, MultiEdit, Desktop, ListAppNotes, ReadAppNote
+from yuki.agent.tools.views import Click, Type, Scroll, Move, Shortcut, Wait, Scrape, Done, Shell, Memory, App, ListAppNotes, ReadAppNote
 from yuki.agent.desktop.service import Desktop as _Desktop
 from typing import Literal,Optional
 from yuki.tools import Tool
@@ -48,7 +48,7 @@ def app_tool(mode:Literal['launch','resize','switch']='launch',name:Optional[str
     '''
     Manages application windows: launch new apps, switch between open windows, or resize/reposition the active window.
 
-    - launch: Opens an application via the Start Menu. Provide the app name as it appears in Start Menu.
+    - launch: Opens an application by name (as it appears in /Applications or Spotlight). Also brings an already-running app to the foreground.
     - switch: Brings an already-open window to the foreground. Provide the window title from the Window Info list.
     - resize: Moves and resizes the currently active window. Provide loc=[x,y] for position and size=[w,h] for dimensions.
     '''
@@ -294,39 +294,15 @@ def move_tool(loc:list[int],drag:bool=False,**kwargs)->str:
 @Tool('shortcut_tool',model=Shortcut)
 def shortcut_tool(shortcut:str,**kwargs)->str:
     '''
-    Presses a keyboard shortcut. Use '+' to combine keys (e.g., 'ctrl+c').
+    Presses a macOS keyboard shortcut. Use '+' to combine keys (e.g., 'cmd+c').
 
-    Common shortcuts: ctrl+c (copy), ctrl+v (paste), ctrl+z (undo), ctrl+s (save), ctrl+a (select all), ctrl+f (find), ctrl+w (close tab), ctrl+t (new tab), alt+tab (switch window), alt+f4 (close app), enter (confirm), escape (cancel), win (start menu).
+    Common macOS shortcuts: cmd+c (copy), cmd+v (paste), cmd+z (undo), cmd+s (save), cmd+a (select all), cmd+f (find), cmd+w (close tab/window), cmd+t (new tab), cmd+l (focus address bar), cmd+k (in-app search in many apps), cmd+tab (switch app), cmd+q (quit app), cmd+space (Spotlight), enter (confirm), escape (cancel).
 
-    Prefer shortcuts over mouse interactions when the operation is unambiguous.
+    Prefer shortcuts over mouse interactions when the operation is unambiguous — they are faster and don't depend on element coordinates.
     '''
     desktop:_Desktop=kwargs['desktop']
     desktop.shortcut(shortcut)
     return f'Pressed {shortcut}.'
-
-@Tool('multi_select_tool',model=MultiSelect)
-def multi_select_tool(press_ctrl:Literal['true','false']='true',elements:list[list[int]]=[],**kwargs)->str:
-    '''
-    Clicks multiple locations in sequence. With press_ctrl=true, holds Ctrl to accumulate a multi-selection (e.g., selecting multiple files, checkboxes, or list items). With press_ctrl=false, clicks each location independently in order.
-
-    Provide a list of [x, y] coordinates. Each is clicked once in the order given.
-    '''
-    desktop:_Desktop=kwargs['desktop']
-    desktop.multi_select(press_ctrl,elements)
-    elements_str = '\n'.join([f"({x},{y})" for x,y in elements])
-    return f'Multi-selected elements at {elements_str}.'
-
-@Tool('multi_edit_tool',model=MultiEdit)
-def multi_edit_tool(elements:list[list],**kwargs)->str:
-    '''
-    Types text into multiple input fields in one action. Each entry is [x, y, text]: the tool clicks the location and types the text, then moves to the next entry.
-
-    Use for filling out forms with multiple fields (name, email, address) or editing several text inputs at once. More efficient than calling type_tool repeatedly.
-    '''
-    desktop:_Desktop=kwargs['desktop']
-    desktop.multi_edit(elements)
-    elements_str = ','.join([f'({x},{y}) text={text}' for x,y,text in elements])
-    return f'Multi-edited elements at {elements_str}.'
 
 @Tool('wait_tool',model=Wait)
 def wait_tool(duration:int,**kwargs)->str:
@@ -336,23 +312,6 @@ def wait_tool(duration:int,**kwargs)->str:
     sleep(duration)
     return f'Waited for {duration} seconds.'
 
-@Tool('desktop_tool', model=Desktop)
-def desktop_tool(action: Literal['create', 'remove', 'rename', 'switch'], desktop_name: Optional[str] = None, new_name: Optional[str] = None, **kwargs) -> str:
-    '''
-    Manages macOS virtual desktops (Spaces) for workspace organization via Mission Control.
-
-    - create: Creates a new Space by opening Mission Control and adding a desktop.
-    - remove: Removes the current Space. Switch to the target Space first using switch, then remove it.
-    - switch: Switches to a Space by number (e.g., desktop_name="2") or direction (desktop_name="left"/"right"/"next"/"previous").
-      Switching by number requires the shortcut to be enabled in System Settings > Keyboard > Shortcuts > Mission Control.
-    - rename: Not supported on macOS. Spaces are identified by number, not name.
-    '''
-    desktop: _Desktop = kwargs['desktop']
-    try:
-        return desktop.manage_spaces(action, desktop_name, new_name)
-    except Exception as e:
-        return f"Error executing desktop action '{action}': {str(e)}"
-
 def _truncate_scrape(content: str) -> str:
     if len(content) > _SCRAPE_MAX_CHARS:
         return content[:_SCRAPE_MAX_CHARS] + f"\n\n...[truncated — {len(content) - _SCRAPE_MAX_CHARS} chars omitted. Scroll the page and scrape again to read more.]"
@@ -361,24 +320,15 @@ def _truncate_scrape(content: str) -> str:
 @Tool('scrape_tool',model=Scrape)
 def scrape_tool(url:str,**kwargs)->str:
     '''
-    Extracts visible text content from the webpage currently displayed in the browser and returns it as markdown.
+    Fetches a URL over HTTP (fresh, logged-OUT session) and returns the page text as markdown.
 
-    This reads the rendered page content via the accessibility tree — not the raw HTML. Provide the URL of the page currently open in the browser. The output includes scroll position indicators so you know if there is more content above or below.
+    NOTE: this does NOT see the page as rendered in the user's browser — no cookies, no login state, no JavaScript. For content behind a login or rendered client-side, read the "Visible Text" section of the Desktop State, or use browser_tool(action='current_text') to read the page the user actually has open.
 
-    Use when you need to read, analyze, or extract information from a webpage.
+    Use for public pages: articles, docs, search results.
     '''
     desktop:_Desktop=kwargs['desktop']
-    desktop_state=desktop.desktop_state
-    tree_state=desktop_state.tree_state
-    if not tree_state.dom_node:
-        content=_truncate_scrape(desktop.scrape(url))
-        return f'URL:{url}\nContent:\n{content}'
-    dom_node=tree_state.dom_node
-    vertical_scroll_percent=dom_node.vertical_scroll_percent
-    content=_truncate_scrape('\n'.join([node.text for node in tree_state.dom_informative_nodes]))
-    header_status = "Reached top" if vertical_scroll_percent <= 0 else "Scroll up to see more"
-    footer_status = "Reached bottom" if vertical_scroll_percent >= 100 else "Scroll down to see more"
-    return f'URL:{url}\nContent:\n{header_status}\n{content}\n{footer_status}'
+    content=_truncate_scrape(desktop.scrape(url))
+    return f'URL:{url}\nContent:\n{content}'
 
 
 def _first_meaningful_line(body: str, max_len: int = 140) -> str:

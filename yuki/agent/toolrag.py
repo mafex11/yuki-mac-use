@@ -33,6 +33,12 @@ _CORE = (
     "shortcut_tool",
     "wait_tool",
     "shell_tool",
+    # Navigation knowledge + in-page movement must never be filtered out:
+    # scroll is how the model reaches offscreen elements, and app notes hold
+    # the per-app guidance accumulated from past runs.
+    "scroll_tool",
+    "list_app_notes",
+    "read_app_note",
 )
 
 

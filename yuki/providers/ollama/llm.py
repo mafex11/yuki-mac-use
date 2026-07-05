@@ -44,6 +44,15 @@ class ChatOllama(BaseChatLLM):
         self.client = Client(host=self.host, timeout=timeout)
         self.aclient = AsyncClient(host=self.host, timeout=timeout)
         self.kwargs = kwargs
+        # Ollama defaults to a 4k context window and silently truncates from
+        # the FRONT when exceeded — dropping the system prompt and task first.
+        # An agent step (system prompt + tool schemas + AX state + history)
+        # blows past 4k within a few steps, so set a sane floor explicitly.
+        # Override with YUKI_OLLAMA_NUM_CTX or an options.num_ctx kwarg.
+        options = dict(self.kwargs.get("options") or {})
+        if "num_ctx" not in options:
+            options["num_ctx"] = int(os.environ.get("YUKI_OLLAMA_NUM_CTX", "16384"))
+        self.kwargs["options"] = options
 
     @property
     def model_name(self) -> str:

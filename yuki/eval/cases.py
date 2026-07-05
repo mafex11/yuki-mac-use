@@ -87,10 +87,6 @@ CASES: list[EvalCase] = [
     EvalCase(task="hold on a few seconds while it loads",
              expected_plan=[ExpectedStep("wait_tool"), ExpectedStep("done_tool")]),
 
-    # ---- desktop_tool (spaces) ----
-    EvalCase(task="make a new desktop space",
-             expected_plan=[ExpectedStep("desktop_tool", {"action": r"(?i)create"}), ExpectedStep("done_tool")]),
-
     # ---- done_tool: questions / chat (must NOT reach for a desktop action) ----
     EvalCase(task="what is the capital of France?",
              expected_plan=[ExpectedStep("done_tool", {"answer": r"(?i)paris"})]),

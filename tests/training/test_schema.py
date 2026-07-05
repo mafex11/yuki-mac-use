@@ -76,4 +76,5 @@ def test_empty_task_rejected() -> None:
 def test_valid_tool_names_matches_registry() -> None:
     names = valid_tool_names()
     assert "app_tool" in names and "done_tool" in names
-    assert len(names) == 16
+    # Registry size floats as native tools are added; pin only the essentials.
+    assert {"click_tool", "type_tool", "shell_tool", "shortcut_tool"} <= names

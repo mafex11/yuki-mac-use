@@ -295,10 +295,12 @@ TRAJECTORIES: list[Trajectory] = [
                     answer="I selected all the text and copied it.")},
     ]},
 
-    # 17. Create a new desktop space then switch (desktop_tool, two actions)
+    # 17. Create a new desktop space (shell_tool AppleScript; desktop_tool removed)
     {"goal": "create a new desktop space and switch to it", "steps": [
-        {"screen": "", "tool": "desktop_tool",
-         "args": _t("Add a new virtual desktop.", evaluate="neutral", action="create")},
+        {"screen": "", "tool": "shell_tool",
+         "args": _t("Open Mission Control to add a virtual desktop.", evaluate="neutral",
+                    mode="osascript",
+                    command='tell application "Mission Control" to launch')},
         {"screen": "", "tool": "done_tool",
          "args": _t("New space created.", evaluate="success",
                     answer="I created a new desktop space and moved you to it.")},

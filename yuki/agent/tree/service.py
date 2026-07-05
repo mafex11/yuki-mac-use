@@ -159,11 +159,28 @@ class Tree:
                         active_window.bundle_id, dict(sorted(role_counts.items())),
                     )
 
+        ax_warning = ""
+        if active_window:
+            fg_interactive = [
+                n for n in interactive_nodes
+                if n.control_type not in ("AXDockItem", "AXMenuBarItem", "AXMenuItem")
+            ]
+            if not fg_interactive:
+                ax_warning = (
+                    f"WARNING: '{active_window.name or active_window.bundle_id}' "
+                    "exposed no accessibility elements (canvas-based UI, or the "
+                    "app was slow to respond). Do NOT conclude elements are "
+                    "absent. Prefer keyboard shortcuts, the app's built-in "
+                    "search (cmd+k / cmd+l / cmd+f), URL schemes, a native "
+                    "app tool, or AppleScript via shell_tool."
+                )
+
         return TreeState(
             status=True,
             interactive_nodes=interactive_nodes,
             scrollable_nodes=scrollable_nodes,
             dom_informative_nodes=dom_informative_nodes,
+            ax_warning=ax_warning,
         )
 
     @staticmethod
@@ -468,10 +485,12 @@ class Tree:
         AXUIElementCopyMultipleAttributeValues, replacing the previous approach of
         making individual GetAttribute calls for each property.
         """
-        stack = deque([(root_control.Element, is_browser)])
+        # (element, is_browser, in_tab_group) — the third flag marks children of
+        # an AXTabGroup so the canonical classifier can tag them as tabs.
+        stack = deque([(root_control.Element, is_browser, False)])
 
         while stack:
-            element, current_is_browser = stack.pop()
+            element, current_is_browser, in_tab_group = stack.pop()
 
             early = ax.GetEarlyTraversalBatch(element)
 
@@ -482,9 +501,11 @@ class Tree:
             if early['hidden'] or role in PRUNABLE_ROLES:
                 continue
 
+            child_in_tab_group = role == "AXTabGroup"
+
             if rect is None:
                 for child_element in reversed(children):
-                    stack.append((child_element, current_is_browser))
+                    stack.append((child_element, current_is_browser, child_in_tab_group))
                 continue
 
             is_visible = rect.width > 1 and rect.height > 1
@@ -590,6 +611,13 @@ class Tree:
                 if late.get('role_description'):
                     metadata['role_description'] = late['role_description']
 
+                # Selection state straight from AX (tabs, list rows, sidebar
+                # items) — geometric focus matching can't see this.
+                if late.get('selected'):
+                    metadata['selected'] = True
+                if in_tab_group:
+                    metadata['in_tab_group'] = True
+
                 axid_str = str(late.get('identifier') or '')
                 name_str = str(label or '')
                 is_private_api = (
@@ -619,12 +647,36 @@ class Tree:
                         attrs, interactive_nodes, window_name, main_window_bounding_box
                     )
 
+            elif role in ("AXStaticText", "AXHeading") and is_visible:
+                # Visible on-screen text (message bodies, search results, dialog
+                # text, errors). Without this the model navigates among unlabeled
+                # controls with no idea what the screen SAYS.
+                value = ax.GetAttribute(element, ax.Attribute.Value)
+                text = str(value).strip() if value is not None else ""
+                if text:
+                    dom_informative_nodes.append(
+                        TextElementNode(
+                            text=text,
+                            center=bounding_box.get_center(),
+                            window_name=window_name,
+                        )
+                    )
+
             if role in SCROLLABLE_ROLES and is_visible:
                 first_child = children[0] if children else None
                 scroll_label = ""
                 if first_child is not None:
                     child_late = ax.GetLateTraversalBatch(first_child)
                     scroll_label = child_late['label']
+                scroll_meta: dict = {}
+                try:
+                    pattern = ax.ScrollPattern(element)
+                    if pattern.VerticallyScrollable:
+                        scroll_meta['vertical_percent'] = round(pattern.VerticalScrollPercent)
+                    if pattern.HorizontallyScrollable:
+                        scroll_meta['horizontal_percent'] = round(pattern.HorizontalScrollPercent)
+                except Exception:
+                    pass
                 scrollable_nodes.append(
                     ScrollElementNode(
                         name=scroll_label,
@@ -632,8 +684,9 @@ class Tree:
                         window_name=window_name,
                         bounding_box=bounding_box,
                         center=bounding_box.get_center(),
+                        metadata=scroll_meta,
                     )
                 )
 
             for child_element in reversed(children):
-                stack.append((child_element, current_is_browser))
+                stack.append((child_element, current_is_browser, child_in_tab_group))

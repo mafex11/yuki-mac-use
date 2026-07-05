@@ -166,11 +166,11 @@ SEEDS: list[dict[str, Any]] = [
                 answer="I can't check live weather, but I can open a weather site "
                        "if you'd like.")},
 
-    # ---- desktop_tool: spaces (distinct intent) ----
-    {"task": "create a new desktop space", "screen": "", "tool": "desktop_tool",
-     "args": _t("Add a virtual desktop.", action="create")},
-    {"task": "switch to the Work desktop", "screen": "", "tool": "desktop_tool",
-     "args": _t("Switch spaces.", action="switch", desktop_name="Work")},
+    # ---- shell_tool: spaces via Mission Control shortcut (desktop_tool removed) ----
+    {"task": "create a new desktop space", "screen": "", "tool": "shell_tool",
+     "args": _t("Add a virtual desktop via Mission Control AppleScript.",
+                mode="osascript",
+                command='tell application "Mission Control" to launch')},
 
     # ---- list_app_notes / read_app_note: vault guidance (rare, but real) ----
     {"task": "what do you know about controlling WhatsApp", "screen": "", "tool": "list_app_notes",

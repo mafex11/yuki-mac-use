@@ -63,8 +63,22 @@ class ChatGoogle(BaseChatLLM):
         return "google"
 
     def _is_thinking_model(self) -> bool:
-        """Check if the model supports extended thinking (Gemini 2.5 series)."""
-        return "2.5" in self._model
+        """Check if the model supports extended thinking (Gemini 2.5 / 3.x)."""
+        return "2.5" in self._model or self._model.startswith("gemini-3")
+
+    @staticmethod
+    def _signature_bytes(signature: str | bytes | None) -> Optional[bytes]:
+        """Normalize a stored thought signature to the bytes the SDK expects."""
+        if signature is None:
+            return None
+        if isinstance(signature, bytes):
+            return signature
+        import base64
+
+        try:
+            return base64.b64decode(signature)
+        except Exception:
+            return None
 
     def _convert_messages(
         self, messages: List[BaseMessage]
@@ -117,9 +131,13 @@ class ChatGoogle(BaseChatLLM):
                 model_parts: list[types.Part] = []
                 if msg.thinking:
                     model_parts.append(types.Part(thought=True, text=msg.thinking))
-                model_parts.append(
-                    types.Part.from_function_call(name=msg.name, args=msg.params)
-                )
+                fc_part = types.Part.from_function_call(name=msg.name, args=msg.params)
+                # Gemini 3.x validates thought signatures on replayed
+                # function-call turns; omitting them breaks multi-turn tool use.
+                sig = self._signature_bytes(msg.thinking_signature)
+                if sig is not None:
+                    fc_part.thought_signature = sig
+                model_parts.append(fc_part)
                 raw_contents.append(types.Content(role="model", parts=model_parts))
 
                 # Function response
@@ -166,6 +184,18 @@ class ChatGoogle(BaseChatLLM):
                 )
             else:
                 merged.append(content)
+
+        # Within a merged user turn, put text/image parts BEFORE
+        # function_response parts. Gemini 3.x treats a turn ending in plain
+        # text after a function_response as a closed exchange and replies
+        # with empty text instead of the next tool call.
+        for i, content in enumerate(merged):
+            if content.role != "user" or not content.parts:
+                continue
+            fr_parts = [p for p in content.parts if p.function_response]
+            other = [p for p in content.parts if not p.function_response]
+            if fr_parts and other:
+                merged[i] = types.Content(role="user", parts=other + fr_parts)
         return merged
 
     def _convert_tools(self, tools: List[Tool]) -> list[types.Tool]:
@@ -252,6 +282,21 @@ class ChatGoogle(BaseChatLLM):
             pass
         return "\n".join(thinking_parts) if thinking_parts else None
 
+    def _extract_signature(self, response: Any) -> Optional[bytes]:
+        """
+        Extract the thought signature Gemini 3.x attaches to function-call
+        parts. Must be replayed on the same part in follow-up turns.
+        """
+        try:
+            if response.candidates and response.candidates[0].content:
+                for part in response.candidates[0].content.parts:
+                    sig = getattr(part, "thought_signature", None)
+                    if sig:
+                        return sig
+        except (AttributeError, IndexError):
+            pass
+        return None
+
     def _extract_text(self, response: Any) -> str:
         """
         Extract text content from response parts, excluding thought parts.
@@ -300,6 +345,13 @@ class ChatGoogle(BaseChatLLM):
         if function_calls:
             fc = function_calls[0]
             fc_id = getattr(fc, "id", None) or f"call_{uuid.uuid4().hex[:8]}"
+            thinking_content = self._extract_thinking(response)
+            signature = self._extract_signature(response)
+            thinking_obj = (
+                Thinking(content=thinking_content, signature=signature)
+                if thinking_content or signature
+                else None
+            )
             return LLMEvent(
                 type=LLMEventType.TOOL_CALL,
                 tool_call=ToolCall(
@@ -307,6 +359,7 @@ class ChatGoogle(BaseChatLLM):
                     name=fc.name,
                     params=dict(fc.args) if fc.args else {}
                 ),
+                thinking=thinking_obj,
                 usage=usage
             )
 

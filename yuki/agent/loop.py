@@ -39,6 +39,8 @@ class LoopGuard:
         # action is seen). Distinct from _hashes which tracks a sliding window.
         self._consecutive_repeats: int = 1
         self._last_consecutive_tool: str | None = None
+        self._change_summary: str = ''
+        self._last_window_title: str = ''
 
     def record_action(self, tool: str, params: dict, is_success: bool = True) -> None:
         if tool in _EXEMPT:
@@ -77,8 +79,10 @@ class LoopGuard:
         if desktop_state and desktop_state.active_window:
             w = desktop_state.active_window
             window_id = f"{w.bundle_id}:{w.pid}"
+            window_title = w.name or w.bundle_id
         else:
             window_id = "no_window"
+            window_title = "no window"
 
         if desktop_state and desktop_state.tree_state:
             content_text = desktop_state.tree_state.interactive_elements_to_string()
@@ -90,11 +94,39 @@ class LoopGuard:
         digest = hashlib.sha256(content_text.encode('utf-8', errors='replace')).hexdigest()[:16]
         state = (window_id, digest)
 
+        # Per-step change summary, surfaced to the model in the next state
+        # message. "Nothing changed" after a click is the single most useful
+        # signal for self-correction — without it the model assumes success.
+        if self._last_state is None:
+            self._change_summary = ''
+        elif state == self._last_state:
+            self._change_summary = (
+                'NO visible change: the active window and its elements are '
+                'identical to before your last action. If you expected a '
+                'change, the action likely missed or had no effect.'
+            )
+        elif self._last_state[0] != state[0]:
+            self._change_summary = (
+                f"The foreground window CHANGED to '{window_title}'. "
+                'Coordinates from the previous state are stale — use the '
+                'element list below.'
+            )
+        else:
+            self._change_summary = (
+                'The window contents changed after your last action '
+                '(same app in foreground).'
+            )
+        self._last_window_title = window_title
+
         if state == self._last_state:
             self._stagnant += 1
         else:
             self._stagnant = 0
         self._last_state = state
+
+    def change_summary(self) -> str:
+        """Human-readable description of what changed since the previous state."""
+        return self._change_summary
 
         fingerprint = f'{window_id}|{digest}'
         count = self._visited_states.get(fingerprint, 0) + 1
@@ -144,15 +176,15 @@ class LoopGuard:
 
         Triggered when the same (tool, params) was seen `_HARD_STOP_REPEATS`
         consecutive times — port of LLM-OS rule #7. The agent loop should
-        inject this as a system message forcing `done_tool` or `human_tool`.
+        inject this as a system message forcing `done_tool` or a new approach.
         """
         if self._consecutive_repeats >= _HARD_STOP_REPEATS and self._last_consecutive_tool:
             return (
                 f"You have called '{self._last_consecutive_tool}' with the same "
                 f"parameters {self._consecutive_repeats} times in a row without "
                 "the desired effect. STOP. Call `done_tool` reporting partial "
-                "success and the specific failure, OR call `human_tool` to ask "
-                "for guidance, OR take a substantively different approach "
+                "success and the specific failure and asking the user for "
+                "guidance, OR take a substantively different approach "
                 "(different tool, different coordinates from the refreshed "
                 "Desktop State, different shortcut). Do NOT call the same "
                 "action a fourth time."
@@ -170,6 +202,8 @@ class LoopGuard:
         self._failed_retry_warning = ''
         self._consecutive_repeats = 1
         self._last_consecutive_tool = None
+        self._change_summary = ''
+        self._last_window_title = ''
 
 
 def should_continue(assistant_message) -> bool:

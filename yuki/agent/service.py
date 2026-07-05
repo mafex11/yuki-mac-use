@@ -42,15 +42,18 @@ _POST_ACTION_SETTLE: dict[str, float] = {
     "scroll_tool": 0.2,        # content reflows
     "move_tool": 0.0,          # pure mouse move; no UI mutation
     "drag_tool": 0.3,          # drop may reorder UI
-    "multi_select_tool": 0.2,
-    "multi_edit_tool": 0.2,
     # No settle: explicit wait or terminal/non-UI tools
     "wait_tool": 0.0,          # already waited
     "done_tool": 0.0,          # terminal
     "shell_tool": 0.0,         # background shell, no UI mutation
     "memory_tool": 0.0,
     "scrape_tool": 0.0,
-    "desktop_tool": 0.5,       # space switching
+    # Native app tools (AppleScript): app-level actions like play/open need a
+    # beat for the app to react before the next snapshot.
+    "spotify_tool": 0.5,
+    "music_tool": 0.5,
+    "browser_tool": 1.0,       # opening a URL starts a page load
+    "system_tool": 0.3,
 }
 
 
@@ -75,7 +78,7 @@ class Agent(BaseAgent):
         log_to_console: bool = True,
         event_subscriber: Callable[[AgentEvent], None] | None = None,
         experimental: bool = False,
-        disable_loop_detection: bool = True,
+        disable_loop_detection: bool = False,
     ):
         """
         Initialize the Agent.
@@ -95,7 +98,7 @@ class Agent(BaseAgent):
             log_to_console: Show intermediate steps in the console.
             event_subscriber: Optional callback for each agent event.
             experimental: Include experimental tools.
-            disable_loop_detection: Disable loop detection warnings. Defaults to True.
+            disable_loop_detection: Disable loop detection warnings. Defaults to False (guard active).
         """
         self.name = "MacOS Use"
         self.description = "An agent that can interact with GUI elements on macOS"
@@ -177,6 +180,12 @@ class Agent(BaseAgent):
         for step in range(self.state.max_steps):
             self.state.step = step
 
+            # Snapshot FIRST so change detection can diff against the previous
+            # step before the prompt is built from this same snapshot.
+            self.desktop.get_state()
+            self._loop_guard.record_state(self.desktop.desktop_state)
+            ui_change = self._loop_guard.change_summary() if step > 0 else ""
+
             nudge = None if self.disable_loop_detection else self._loop_guard.check()
             hard_stop = None if self.disable_loop_detection else self._loop_guard.hard_stop_reason()
             if hard_stop:
@@ -188,6 +197,8 @@ class Agent(BaseAgent):
                 desktop=self.desktop,
                 nudge=nudge or "",
                 verbosity=self._ax_verbosity(),
+                ui_change=ui_change,
+                refresh=False,
             )
             _aw = (
                 self.desktop.desktop_state.active_window
@@ -225,6 +236,7 @@ class Agent(BaseAgent):
                         "focused_input": focused_input,
                         "url_bars": url_bars[:3],
                         "search_fields": search_fields[:3],
+                        "ui_change": ui_change or None,
                     },
                 )
             )
@@ -233,8 +245,6 @@ class Agent(BaseAgent):
                     AgentEvent(type=EventType.ERROR, data={"step": step, "error": f"Loop detected: {nudge}"})
                 )
             self.state.messages.append(state_msg)
-
-            self._loop_guard.record_state(self.desktop.desktop_state)
 
             # Reason: call LLM with retry
             message: ToolMessage | None = None
@@ -285,6 +295,8 @@ class Agent(BaseAgent):
                 return AgentResult(is_done=False, error=error)
 
             self.state.messages.pop()  # Remove the previous state message
+            # Text-rejection nudges only matter within this step's retry loop.
+            self.state.error_messages.clear()
 
             tool_name = message.name
             tool_params = message.params
@@ -327,14 +339,13 @@ class Agent(BaseAgent):
             if settle > 0.0 and tool_name != "done_tool":
                 time.sleep(settle)
 
-            if tool_result.is_success:
-                content = tool_result.content
-                message.content = content
-                self.state.messages.append(message)
-            else:
-                content = tool_result.error
-                message.content = content
-                self.state.error_messages.append(message)
+            # Both outcomes go into the MAIN history so the model sees actions
+            # and their failures in chronological order. (Failures used to go
+            # to the error_messages side-channel, which is appended after the
+            # whole history on every call — out of order and never pruned.)
+            content = tool_result.content if tool_result.is_success else tool_result.error
+            message.content = content
+            self.state.messages.append(message)
 
             if tool_name != "done_tool":
                 self.event.emit(
@@ -410,6 +421,12 @@ class Agent(BaseAgent):
         for step in range(self.state.max_steps):
             self.state.step = step
 
+            # Snapshot FIRST so change detection can diff against the previous
+            # step before the prompt is built from this same snapshot.
+            self.desktop.get_state()
+            self._loop_guard.record_state(self.desktop.desktop_state)
+            ui_change = self._loop_guard.change_summary() if step > 0 else ""
+
             nudge = None if self.disable_loop_detection else self._loop_guard.check()
             hard_stop = None if self.disable_loop_detection else self._loop_guard.hard_stop_reason()
             if hard_stop:
@@ -421,6 +438,8 @@ class Agent(BaseAgent):
                 desktop=self.desktop,
                 nudge=nudge or "",
                 verbosity=self._ax_verbosity(),
+                ui_change=ui_change,
+                refresh=False,
             )
             _aw = (
                 self.desktop.desktop_state.active_window
@@ -458,6 +477,7 @@ class Agent(BaseAgent):
                         "focused_input": focused_input,
                         "url_bars": url_bars[:3],
                         "search_fields": search_fields[:3],
+                        "ui_change": ui_change or None,
                     },
                 )
             )
@@ -466,8 +486,6 @@ class Agent(BaseAgent):
                     AgentEvent(type=EventType.ERROR, data={"step": step, "error": f"Loop detected: {nudge}"})
                 )
             self.state.messages.append(state_msg)
-
-            self._loop_guard.record_state(self.desktop.desktop_state)
 
             message: ToolMessage | None = None
             last_error: Exception | None = None
@@ -517,6 +535,8 @@ class Agent(BaseAgent):
                 return AgentResult(is_done=False, error=error)
 
             self.state.messages.pop()
+            # Text-rejection nudges only matter within this step's retry loop.
+            self.state.error_messages.clear()
 
             tool_name = message.name
             tool_params = message.params
@@ -557,14 +577,13 @@ class Agent(BaseAgent):
             if settle > 0.0 and tool_name != "done_tool":
                 await asyncio.sleep(settle)
 
-            if tool_result.is_success:
-                content = tool_result.content
-                message.content = content
-                self.state.messages.append(message)
-            else:
-                content = tool_result.error
-                message.content = content
-                self.state.error_messages.append(message)
+            # Both outcomes go into the MAIN history so the model sees actions
+            # and their failures in chronological order. (Failures used to go
+            # to the error_messages side-channel, which is appended after the
+            # whole history on every call — out of order and never pruned.)
+            content = tool_result.content if tool_result.is_success else tool_result.error
+            message.content = content
+            self.state.messages.append(message)
 
             if tool_name != "done_tool":
                 self.event.emit(

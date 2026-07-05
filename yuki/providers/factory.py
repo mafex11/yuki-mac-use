@@ -22,7 +22,7 @@ _DEFAULT_MODELS = {
     # qwen2.5:7b is the validated local default: with Tool RAG it scores 0.90
     # on the agent eval suite (reliable tool selection), fully on-device.
     "ollama": "qwen2.5:7b",
-    "google": "gemini-2.5-flash",
+    "google": "gemini-3.5-flash",
     "openai": "gpt-4o",
 }
 
@@ -46,12 +46,13 @@ def default_thinking_budget_for(provider: str, model: str) -> int | None:
     its own. Local models (Ollama) and models without thinking support get None.
 
     - anthropic: all current Claude models support extended thinking.
-    - google: only the Gemini 2.5 series supports thinking.
+    - google: Gemini 2.5 and 3.x series support thinking (3.x thinks by
+      default; the budget caps it to keep per-step latency bounded).
     - everything else (ollama, older Gemini): None.
     """
     if provider == "anthropic":
         return _DEFAULT_THINKING_BUDGET
-    if provider == "google" and "2.5" in model:
+    if provider == "google" and ("2.5" in model or model.startswith("gemini-3")):
         return _DEFAULT_THINKING_BUDGET
     return None
 

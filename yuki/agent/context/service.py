@@ -89,8 +89,15 @@ class Context:
         desktop: Desktop,
         nudge: str = "",
         verbosity: str = "full",
+        ui_change: str = "",
+        refresh: bool = True,
     ) -> HumanMessage | ImageMessage:
-        desktop_state = desktop.get_state()
+        # refresh=False reuses desktop.desktop_state — the agent loop snapshots
+        # first (so change detection can diff before prompting), then builds
+        # the prompt from that same snapshot.
+        desktop_state = desktop.get_state() if refresh else desktop.desktop_state
+        if desktop_state is None:
+            desktop_state = desktop.get_state()
         content = self._build_state_prompt(
             query=query,
             step=step,
@@ -98,6 +105,7 @@ class Context:
             desktop=desktop,
             nudge=nudge,
             verbosity=verbosity,
+            ui_change=ui_change,
         )
         if desktop.use_vision and desktop_state.screenshot:
             return ImageMessage(images=[desktop_state.screenshot], content=content)
@@ -111,11 +119,20 @@ class Context:
         desktop: Desktop,
         nudge: str = "",
         verbosity: str = "full",
+        ui_change: str = "",
     ) -> str:
         desktop_state = desktop.desktop_state
         cursor_x, cursor_y = ax.GetCursorPos()
         template = _load_template("human.md")
         loop_warning = f"[Loop Warning]\n{nudge}\n[End of Loop Warning]\n" if nudge else ""
+        tree_state = (
+            desktop_state.tree_state
+            if desktop.use_accessibility and desktop_state and desktop_state.tree_state
+            else None
+        )
+        ax_warning = ""
+        if tree_state and getattr(tree_state, "ax_warning", ""):
+            ax_warning = f"{tree_state.ax_warning}\n\n        "
         return template.format(**{
             "steps": step,
             "max_steps": max_steps,
@@ -123,15 +140,22 @@ class Context:
             "active_window": desktop_state.active_window_to_string() if desktop_state else "No active window",
             "windows": desktop_state.windows_to_string() if desktop_state else "No windows",
             "cursor_location": f"({cursor_x},{cursor_y})",
+            "ax_warning": ax_warning,
             "interactive_elements": (
-                desktop_state.tree_state.interactive_elements_to_string(verbosity=verbosity)
-                if desktop.use_accessibility and desktop_state and desktop_state.tree_state
-                else "No accessibility data is available"
+                tree_state.interactive_elements_to_string(verbosity=verbosity)
+                if tree_state else "No accessibility data is available"
             ),
             "scrollable_elements": (
-                desktop_state.tree_state.scrollable_elements_to_string()
-                if desktop.use_accessibility and desktop_state and desktop_state.tree_state
-                else "No accessibility data is available"
+                tree_state.scrollable_elements_to_string()
+                if tree_state else "No accessibility data is available"
+            ),
+            "visible_text": (
+                tree_state.visible_text_to_string(verbosity=verbosity)
+                if tree_state else "No accessibility data is available"
+            ),
+            "ui_change": (
+                f"[UI Change Since Your Last Action]\n{ui_change}\n[End of UI Change]"
+                if ui_change else ""
             ),
             "query": query,
         })

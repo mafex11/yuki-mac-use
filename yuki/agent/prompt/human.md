@@ -13,13 +13,18 @@
     [End of Window Info]
     
     [Begin of Screen]
-        List of Interactive Elements:
+        {ax_warning}List of Interactive Elements:
         {interactive_elements}
 
         List of Scrollable Elements:
         {scrollable_elements}
+
+        Visible Text (what the screen says, reading order):
+        {visible_text}
     [End of Screen]
 [End of Desktop]
+
+{ui_change}
 
 [Begin of User Query]
     {query}

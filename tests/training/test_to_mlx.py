@@ -16,7 +16,7 @@ def _rec() -> dict:
         "screen": "",
         "tool": "app_tool",
         "args": {"thought": "Launch Calculator.", "mode": "launch", "name": "Calculator"},
-        "present_tools": ["type_tool", "app_tool", "done_tool", "desktop_tool"],
+        "present_tools": ["type_tool", "app_tool", "done_tool", "scroll_tool"],
     }
 
 
