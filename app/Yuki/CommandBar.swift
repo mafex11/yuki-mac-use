@@ -40,6 +40,7 @@ final class CommandBar {
         NSApp.activate(ignoringOtherApps: true)
         panel?.makeKeyAndOrderFront(nil)
         panel?.makeFirstResponder(panel?.contentView)
+        animateIn()
         installClickMonitor()
         // Re-request text-field focus on every open (onAppear only fires once
         // because the panel/host view is reused across toggles).
@@ -52,7 +53,30 @@ final class CommandBar {
 
     func close() {
         removeClickMonitor()
-        panel?.orderOut(nil)
+        guard let p = panel, p.isVisible else { return }
+        // Quick fade-out; instant orderOut feels like a glitch.
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.12
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            p.animator().alphaValue = 0
+        }, completionHandler: {
+            p.orderOut(nil)
+            p.alphaValue = 1
+        })
+    }
+
+    /// Raycast-style entrance: fade + a small upward drift.
+    private func animateIn() {
+        guard let p = panel else { return }
+        let target = p.frame.origin
+        p.alphaValue = 0
+        p.setFrameOrigin(NSPoint(x: target.x, y: target.y - 12))
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.18
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            p.animator().alphaValue = 1
+            p.animator().setFrameOrigin(target)
+        }
     }
 
     private func installClickMonitor() {
@@ -140,6 +164,7 @@ struct CommandBarView: View {
                             .foregroundStyle(color(for: turn.role))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .id(turn.id)
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                         if let activity = liveActivity {
                             HStack(spacing: 8) {
@@ -193,6 +218,11 @@ struct CommandBarView: View {
         }
         .frame(width: 720, height: 420)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(.white.opacity(0.08), lineWidth: 1)
+        )
+        .animation(.spring(response: 0.3, dampingFraction: 0.85), value: history.count)
         .onAppear {
             loadStatus()
             inputFocused = true

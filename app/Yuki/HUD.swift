@@ -232,11 +232,24 @@ final class HUD: ObservableObject {
 
 struct HUDView: View {
     @ObservedObject var hud: HUD
+    @State private var breathe = false
+
+    private var accent: Color {
+        switch hud.state {
+        case .success: return .green
+        case .failure: return .red
+        case .cancelled, .paused, .stopping: return .orange
+        case .asking: return .blue
+        default: return Color.accentColor
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 icon
+                    .transition(.scale.combined(with: .opacity))
+                    .id(hud.state)   // re-run the transition on state change
                 Text(title)
                     .font(.callout.weight(.medium))
                     .lineLimit(1)
@@ -248,6 +261,7 @@ struct HUDView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
             if hud.state == .running || hud.state == .stopping, hud.maxSteps > 0 {
                 ProgressView(value: Double(min(hud.step, hud.maxSteps)),
@@ -255,9 +269,12 @@ struct HUDView: View {
                     .progressViewStyle(.linear)
                     .controlSize(.small)
                     .tint(hud.state == .stopping ? .orange : .accentColor)
+                    .animation(.easeOut(duration: 0.4), value: hud.step)
+                    .transition(.opacity)
             }
             if hud.state == .asking {
                 askUI
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if hud.state == .paused {
                 HStack(spacing: 8) {
@@ -266,15 +283,34 @@ struct HUDView: View {
                     Button("Stop") { hud.requestStop() }
                         .buttonStyle(.bordered).controlSize(.small).tint(.red)
                 }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if let next = hud.queuedPreview {
                 Text("next: \(next)").font(.caption2).foregroundStyle(.tertiary)
                     .lineLimit(1)
+                    .transition(.opacity)
             }
         }
         .padding(12)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            // Accent edge that breathes while working — a heartbeat, not a
+            // spinner. Steady in terminal/interactive states.
+            RoundedRectangle(cornerRadius: 14)
+                .strokeBorder(
+                    accent.opacity(
+                        hud.state == .running || hud.state == .stopping
+                            ? (breathe ? 0.55 : 0.15) : 0.4
+                    ),
+                    lineWidth: 1.5
+                )
+        )
+        .shadow(color: accent.opacity(0.16), radius: 10, y: 2)
         .frame(width: 340)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: hud.state)
+        .animation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true),
+                   value: breathe)
+        .onAppear { breathe = true }
     }
 
     @ViewBuilder private var askUI: some View {
