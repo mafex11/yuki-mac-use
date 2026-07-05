@@ -159,6 +159,7 @@ class TreeState:
                 f"you need isn't listed, scroll or narrow the active window."
             )
         for idx, node in enumerate(nodes):
+            node.display_id = idx
             canonical = node.canonical or "-"
             focused_mark = "YES" if node.is_focused else "-"
             if lean:
@@ -269,6 +270,13 @@ class TreeElementNode:
     metadata:dict[str,Any]=field(default_factory=dict)
     is_focused: bool=False
     canonical: str|None=None
+    # Live AXUIElementRef captured during the walk. Lets click_tool act on
+    # the ELEMENT (fresh position, AXPress) instead of a transcribed pixel
+    # coordinate that may be stale by action time. Never serialized.
+    ax_element: Any=None
+    # Row index as displayed to the LLM (set at serialization time) so
+    # click_tool(id=N) can resolve the same row the model saw.
+    display_id: int=-1
 
     def update_from_node(self,node:'TreeElementNode'):
         self.name=node.name

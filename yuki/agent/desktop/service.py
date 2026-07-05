@@ -204,6 +204,47 @@ class Desktop:
             return f"Notification sent: [{title}] {message}"
         return f"Failed to send notification: {result.stderr.strip()}"
 
+    def node_by_display_id(self, display_id: int):
+        """Resolve a display row id from the LAST snapshot to its node."""
+        state = self.desktop_state
+        tree = getattr(state, "tree_state", None) if state else None
+        for node in (getattr(tree, "interactive_nodes", None) or []):
+            if node.display_id == display_id:
+                return node
+        return None
+
+    def click_element(
+        self,
+        node,
+        button: Literal['left', 'right', 'middle'] = 'left',
+        clicks: int = 1,
+    ) -> str:
+        """Click a walked element BY REFERENCE: re-read its live position at
+        click time (the snapshot may be stale), prefer AXPress for plain
+        single left-clicks, and fall back to CGEvent at the fresh center.
+        Returns a short description of how the click was performed."""
+        element = getattr(node, "ax_element", None)
+        # Fresh geometry beats the snapshot's — the element may have moved.
+        fresh = ax.GetRect(element) if element is not None else None
+        if fresh is not None and fresh.width > 0 and fresh.height > 0:
+            x = int(fresh.left + fresh.width // 2)
+            y = int(fresh.top + fresh.height // 2)
+            moved = (x, y) != (node.center.x, node.center.y)
+        else:
+            x, y = node.center.x, node.center.y
+            moved = False
+        if (
+            element is not None
+            and button == 'left'
+            and clicks == 1
+            and 'AXPress' in ax.GetActionNames(element)
+            and ax.PerformAction(element, 'AXPress')
+        ):
+            return f"pressed {node.name!r} via accessibility action"
+        self.click((x, y), button, clicks)
+        suffix = " (element had moved; used fresh position)" if moved else ""
+        return f"clicked {node.name!r} at ({x},{y}){suffix}"
+
     def click(
         self,
         loc: Tuple[int, int],

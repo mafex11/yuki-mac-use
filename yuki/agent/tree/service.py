@@ -636,6 +636,7 @@ class Tree:
                             control_type=role,
                             window_name=window_name,
                             metadata=metadata,
+                            ax_element=element,
                         )
                     )
                 if current_is_browser:
