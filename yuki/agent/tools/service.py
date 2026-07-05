@@ -1,4 +1,4 @@
-from yuki.agent.tools.views import Click, Type, Scroll, Move, Shortcut, Wait, Scrape, Done, Shell, Memory, App, ListAppNotes, ReadAppNote
+from yuki.agent.tools.views import Click, Type, Scroll, Move, Shortcut, Wait, Scrape, Done, Shell, Memory, App, AskUser, ListAppNotes, ReadAppNote
 from yuki.agent.desktop.service import Desktop as _Desktop
 from typing import Literal,Optional
 from yuki.tools import Tool
@@ -42,6 +42,19 @@ def done_tool(answer:str,**kwargs):
     The answer should be formatted in clean markdown.
     '''
     return answer
+
+@Tool('ask_user_tool',model=AskUser)
+def ask_user_tool(question:str,options:Optional[list[str]]=None,**kwargs)->str:
+    '''
+    Asks the user a question mid-task and waits for their reply. Use when genuinely blocked on a decision only the user can make: ambiguous targets (two matching playlists/contacts/files), missing information (which email account), or confirmation before something destructive/irreversible.
+
+    Do NOT use for questions you can answer yourself from the Desktop State, memory, or reasonable defaults. One clear question at a time; provide 2-4 options when the answer is a choice.
+
+    The user's answer is returned as this tool's result — continue the task with it.
+    '''
+    # Executed by the agent loop itself (it owns the interaction hub); the
+    # registry never runs this body.
+    return ''
 
 @Tool('app_tool',model=App)
 def app_tool(mode:Literal['launch','resize','switch']='launch',name:Optional[str]=None,loc:Optional[list[int]]=None,size:Optional[list[int]]=None,**kwargs)->str:
@@ -183,19 +196,25 @@ def shell_tool(command: str,mode:Literal['shell','osascript']='shell',timeout:in
     return f'Response: {response}\nStatus Code: {status}'
 
 @Tool('click_tool',model=Click)
-def click_tool(loc:Optional[list[int]]=None,button:Literal['left','right','middle']='left',clicks:int=1,**kwargs)->str:
+def click_tool(id:Optional[int]=None,loc:Optional[list[int]]=None,button:Literal['left','right','middle']='left',clicks:int=1,**kwargs)->str:
     '''
-    Clicks at the specified pixel coordinates on screen.
+    Clicks an element from the Interactive Elements list (by row id — PREFERRED) or raw pixel coordinates (fallback).
 
-    - Single left click (clicks=1): Select elements, press buttons, focus fields, follow links.
-    - Double left click (clicks=2): Open files, folders, and desktop icons.
-    - Right click (button='right'): Open context menus.
-    - Hover only (clicks=0): Move cursor to location without clicking.
-
-    Use coordinates from the Interactive Elements list in the Desktop State.
+    - id=N: clicks row N from the current Desktop State. The element's live position is re-read at click time and the accessibility press action is used when available, so this works even if the UI shifted since the snapshot. ALWAYS prefer this.
+    - loc=[x,y]: raw coordinate click. Only for targets with no row id (empty space, canvas areas).
+    - Single left click (clicks=1): select, press, focus, follow links. Double (clicks=2): open files/folders/icons. Right: context menus. clicks=0: hover only.
     '''
-    x,y=loc
     desktop:_Desktop=kwargs['desktop']
+    if id is not None:
+        node = desktop.node_by_display_id(id)
+        if node is None:
+            return (f"No element with id {id} in the current Desktop State "
+                    f"(ids are per-snapshot — re-read the list). Nothing was clicked.")
+        how = desktop.click_element(node, button, clicks)
+        return f"Click id={id}: {how}."
+    if loc is None:
+        return "Provide either id (preferred) or loc. Nothing was clicked."
+    x,y=loc
     desktop.click(loc,button,clicks)
     num_clicks={1:'Single',2:'Double',3:'Triple'}
     return f'{num_clicks.get(clicks)} {button} clicked at ({x},{y}).'
@@ -221,25 +240,42 @@ _TEXT_CANONICALS = {"url_bar", "search_field", "primary_input", "text_input"}
 
 
 @Tool('type_tool',model=Type)
-def type_tool(loc:Optional[list[int]]=None,text:str='',clear:Literal['true','false']='false',caret_position:Literal['start','idle','end']='idle',press_enter:Literal['true','false']='false',**kwargs):
+def type_tool(id:Optional[int]=None,loc:Optional[list[int]]=None,text:str='',clear:Literal['true','false']='false',caret_position:Literal['start','idle','end']='idle',press_enter:Literal['true','false']='false',**kwargs):
     '''
     Clicks an input field and types text into it. Do NOT pre-click with click_tool — this tool handles focusing automatically.
 
+    - PREFER id=N (row id from the Interactive Elements list): the field's live position is resolved at type time.
+    - loc=[x,y] is the fallback for fields without a row id.
     - Set clear=true to replace existing text, or clear=false to append.
     - Set press_enter=true to submit after typing (search bars, forms, dialogs).
     - Set caret_position to control where typing begins relative to existing text.
 
     Use for search queries, form fields, text editors, address bars, and any text input.
     '''
-    x,y=loc
     desktop:_Desktop=kwargs['desktop']
+
+    if id is not None:
+        node = desktop.node_by_display_id(id)
+        if node is None:
+            return (f"No element with id {id} in the current Desktop State "
+                    f"(ids are per-snapshot — re-read the list). Nothing was typed.")
+        # Fresh geometry at type time — the field may have moved since snapshot.
+        import yuki.ax as _ax
+        fresh = _ax.GetRect(node.ax_element) if node.ax_element is not None else None
+        if fresh is not None and fresh.width > 0 and fresh.height > 0:
+            loc = [int(fresh.left + fresh.width // 2), int(fresh.top + fresh.height // 2)]
+        else:
+            loc = [node.center.x, node.center.y]
+    if loc is None:
+        return "Provide either id (preferred) or loc. Nothing was typed."
+    x,y=loc
 
     # Ground the target BEFORE typing: what is actually at (x,y) in the last
     # observed state? A coordinate that hits no element, or a non-text element,
     # almost always means the model is typing into the wrong place (stale coords,
     # wrong app focused). Surface that honestly so it can re-focus instead of
     # silently typing into the void.
-    target = _element_at(desktop, x, y)
+    target = desktop.node_by_display_id(id) if id is not None else _element_at(desktop, x, y)
 
     desktop.type(loc=loc,text=text,caret_position=caret_position,clear=clear,press_enter=press_enter)
 

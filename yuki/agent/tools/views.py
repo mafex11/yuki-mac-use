@@ -81,9 +81,14 @@ class Memory(SharedBaseModel):
     )
 
 class Click(SharedBaseModel):
-    loc: list[int] = Field(
-        ...,
-        description="[x, y] pixel coordinates of the target element to click. Use coordinates from the Interactive Elements list.",
+    id: Optional[int] = Field(
+        default=None,
+        description="PREFERRED: the row id of the target element from the Interactive Elements list. The click resolves the element's live position at click time (immune to stale coordinates) and uses the accessibility press action when available.",
+        examples=[3, 12]
+    )
+    loc: Optional[list[int]] = Field(
+        default=None,
+        description="Fallback: [x, y] pixel coordinates. Use ONLY when the target has no row id (e.g. clicking empty space or a spot inside a canvas).",
         examples=[[640, 360], [100, 200]]
     )
     button: Literal['left', 'right', 'middle'] = Field(
@@ -122,9 +127,14 @@ class Shell(SharedBaseModel):
     )
 
 class Type(SharedBaseModel):
-    loc: list[int] = Field(
-        ...,
-        description="[x, y] pixel coordinates of the input field to type into. The tool clicks this location automatically before typing — do not pre-click.",
+    id: Optional[int] = Field(
+        default=None,
+        description="PREFERRED: row id of the input field from the Interactive Elements list. Its live position is resolved at type time.",
+        examples=[0, 5]
+    )
+    loc: Optional[list[int]] = Field(
+        default=None,
+        description="Fallback: [x, y] pixel coordinates of the input field. The tool clicks this location automatically before typing — do not pre-click.",
         examples=[[640, 360], [200, 150]]
     )
     text: str = Field(
@@ -201,6 +211,18 @@ class Scrape(SharedBaseModel):
         ...,
         description="URL of the webpage currently open in the browser. The tool extracts visible text content from the rendered page via the accessibility tree and returns it as markdown.",
         examples=['https://google.com', 'https://example.com/page']
+    )
+
+class AskUser(SharedBaseModel):
+    question: str = Field(
+        ...,
+        description="The question to ask the user, phrased naturally and specifically. One question at a time.",
+        examples=["You have two playlists matching 'japanese': 'Japanese Chill' and 'J-Rock Heavy'. Which one?"]
+    )
+    options: Optional[list[str]] = Field(
+        default=None,
+        description="Optional 2-4 short answer choices shown as buttons. Omit for free-text questions.",
+        examples=[["Japanese Chill", "J-Rock Heavy"]]
     )
 
 class ListAppNotes(SharedBaseModel):
