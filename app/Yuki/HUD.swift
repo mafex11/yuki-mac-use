@@ -1,6 +1,12 @@
 import AppKit
 import SwiftUI
 
+/// Borderless panels refuse key status by default; the ask-reply text field
+/// needs it. nonactivatingPanel keeps the app behind it active either way.
+final class KeyableHUDPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
 /// The activity pill: a small floating overlay that shows what the agent is
 /// doing while it drives the Mac, with a Stop button. The command bar closes
 /// when a task starts; this pill is the task's face until it finishes.
@@ -16,7 +22,10 @@ final class HUD: ObservableObject {
     @Published var state: State = .idle
     @Published var resultPreview = ""   // first lines of the final answer
     @Published var queuedPreview: String? = nil
-    enum State: Equatable { case idle, running, stopping, success, failure, cancelled }
+    @Published var question = ""        // pending ask_user question
+    @Published var questionOptions: [String] = []
+    @Published var answerDraft = ""
+    enum State: Equatable { case idle, running, stopping, success, failure, cancelled, asking, paused }
 
     func begin(task: String) {
         self.task = task
@@ -32,10 +41,27 @@ final class HUD: ObservableObject {
     func clearQueued() { queuedPreview = nil }
 
     func requestStop() {
-        guard state == .running else { return }
+        guard state == .running || state == .asking || state == .paused else { return }
         state = .stopping
         line = "Stopping after this step…"
+        question = ""
         Task { await Backend.shared.cancelControl() }
+    }
+
+    func sendAnswer(_ text: String) {
+        guard state == .asking, !text.isEmpty else { return }
+        state = .running
+        line = "Continuing with your answer…"
+        question = ""
+        questionOptions = []
+        Task { await Backend.shared.answerControl(text) }
+    }
+
+    func resumeTask() {
+        guard state == .paused else { return }
+        state = .running
+        line = "Continuing…"
+        Task { await Backend.shared.resumeControl() }
     }
 
     func dismiss() {
@@ -65,6 +91,18 @@ final class HUD: ObservableObject {
             line = "Stopped"
             resultPreview = ""
             fadeAfter(3)
+        case "ask":
+            state = .asking
+            question = o["question"] as? String ?? "Yuki has a question"
+            questionOptions = o["options"] as? [String] ?? []
+            answerDraft = ""
+            // Key (for typing a reply) without activating our app.
+            panel?.makeKeyAndOrderFront(nil)
+        case "paused":
+            state = .paused
+            line = o["reason"] as? String ?? "Paused — you took over."
+        case "resumed":
+            if state == .paused { state = .running; line = "Continuing…" }
         case "error":
             // While stopping, the agent emits "Stopped by user" as an error
             // before the final cancelled event — don't flash red for that.
@@ -105,6 +143,8 @@ final class HUD: ObservableObject {
             return "Taking notes"
         case "list_app_notes", "read_app_note":
             return "Recalling how this app works"
+        case "ask_user_tool":
+            return "Waiting for your answer"
         case "spotify_tool", "music_tool":
             let action = str("action")
             let app = tool == "spotify_tool" ? "Spotify" : "Music"
@@ -153,7 +193,7 @@ final class HUD: ObservableObject {
     }
 
     private func build() {
-        let p = NSPanel(
+        let p = KeyableHUDPanel(
             contentRect: NSRect(x: 0, y: 0, width: 340, height: 96),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered, defer: false)
@@ -216,6 +256,17 @@ struct HUDView: View {
                     .controlSize(.small)
                     .tint(hud.state == .stopping ? .orange : .accentColor)
             }
+            if hud.state == .asking {
+                askUI
+            }
+            if hud.state == .paused {
+                HStack(spacing: 8) {
+                    Button("Resume") { hud.resumeTask() }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                    Button("Stop") { hud.requestStop() }
+                        .buttonStyle(.bordered).controlSize(.small).tint(.red)
+                }
+            }
             if let next = hud.queuedPreview {
                 Text("next: \(next)").font(.caption2).foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -226,12 +277,42 @@ struct HUDView: View {
         .frame(width: 340)
     }
 
+    @ViewBuilder private var askUI: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(hud.question)
+                .font(.caption)
+                .lineLimit(4)
+            if !hud.questionOptions.isEmpty {
+                // Choice question: one tap per option.
+                HStack(spacing: 6) {
+                    ForEach(hud.questionOptions, id: \.self) { opt in
+                        Button(opt) { hud.sendAnswer(opt) }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
+                }
+            } else {
+                HStack(spacing: 6) {
+                    TextField("Type a reply…", text: $hud.answerDraft)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
+                        .onSubmit { hud.sendAnswer(hud.answerDraft) }
+                    Button("Send") { hud.sendAnswer(hud.answerDraft) }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                }
+            }
+        }
+    }
+
     private var title: String {
         switch hud.state {
         case .success: return "Done"
         case .failure: return "Couldn't finish"
         case .cancelled: return "Stopped"
         case .stopping: return "Stopping…"
+        case .asking: return "Quick question"
+        case .paused: return "Paused — you took over"
         default: return hud.task.isEmpty ? "Working…" : hud.task
         }
     }
@@ -243,6 +324,7 @@ struct HUDView: View {
         case .running, .stopping:
             let steps = hud.maxSteps > 0 ? "  ·  step \(hud.step)/\(hud.maxSteps)" : ""
             return hud.line + steps
+        case .paused: return hud.task
         default: return ""
         }
     }
@@ -253,13 +335,15 @@ struct HUDView: View {
         case .success: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
         case .failure: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
         case .cancelled: Image(systemName: "stop.circle.fill").foregroundStyle(.orange)
+        case .asking: Image(systemName: "questionmark.circle.fill").foregroundStyle(.blue)
+        case .paused: Image(systemName: "pause.circle.fill").foregroundStyle(.orange)
         case .idle: EmptyView()
         }
     }
 
     @ViewBuilder private var trailingButton: some View {
         switch hud.state {
-        case .running:
+        case .running, .asking, .paused:
             Button {
                 hud.requestStop()
             } label: {

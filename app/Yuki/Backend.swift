@@ -315,4 +315,17 @@ final class Backend {
         _ = try? await client.postJSON(
             path: "/chat/control/cancel", body: Data("{}".utf8))
     }
+
+    /// Deliver the user's reply to a pending mid-task question.
+    func answerControl(_ answer: String) async {
+        guard let body = try? JSONSerialization.data(
+                withJSONObject: ["answer": answer]) else { return }
+        _ = try? await client.postJSON(path: "/chat/control/answer", body: body)
+    }
+
+    /// Resume a task paused because the user took over the mouse/keyboard.
+    func resumeControl() async {
+        _ = try? await client.postJSON(
+            path: "/chat/control/resume", body: Data("{}".utf8))
+    }
 }
