@@ -25,9 +25,22 @@ import yaml  # type: ignore[import-untyped]
 
 from yuki.memory import frontmatter as fm
 from yuki.memory import paths
+from yuki.memory.vault import slugify
 from yuki.messages import HumanMessage
 
 log = logging.getLogger(__name__)
+
+# Minimum distinct task records in a day before a skeleton note is
+# auto-created for an app that has no note yet.
+_MIN_RECORDS_FOR_NEW_NOTE = 2
+
+# Bundle ids whose last component is not the app's display name.
+_KNOWN_BUNDLE_NAMES: dict[str, str] = {
+    "com.spotify.client": "Spotify",
+    "com.google.Chrome": "Google Chrome",
+    "com.tinyspeck.slackmacgap": "Slack",
+    "net.whatsapp.WhatsApp": "WhatsApp",
+}
 
 _AUTO_HEADER = "## Auto-learned"
 _AUTO_LEARNED_RE = re.compile(
@@ -82,6 +95,55 @@ def _by_bundle(records: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]
             if bundle_id:
                 out[bundle_id].append(r)
     return out
+
+
+def derive_app_name(bundle_id: str) -> str:
+    """Best-effort display name for an app from its bundle id.
+
+    Known bundles map to their real product name (com.spotify.client →
+    Spotify); otherwise the last dot-component is used, title-cased when it
+    is all-lowercase and kept verbatim when it already has capitals
+    (net.whatsapp.WhatsApp → WhatsApp).
+    """
+    known = _KNOWN_BUNDLE_NAMES.get(bundle_id)
+    if known:
+        return known
+    last = bundle_id.rsplit(".", 1)[-1].strip()
+    if not last:
+        return bundle_id
+    return last.title() if last.islower() else last
+
+
+def _create_skeleton_note(
+    bundle_id: str, auto_block: str, today: date
+) -> Path | None:
+    """Create a new 40-Apps note for an app Yuki has no note for yet."""
+    app_name = derive_app_name(bundle_id)
+    slug = slugify(app_name)
+    if not slug:
+        return None
+    path = paths.vault_dir() / "40-Apps" / f"{slug}.md"
+    if path.exists():  # name collision with an unrelated note — don't clobber
+        return None
+
+    meta: dict[str, object] = {
+        "id": f"app-{slug.lower()}",
+        "type": "app",
+        "name": app_name,
+        "bundle_id": bundle_id,
+        "importance": "occasional",
+        "common_uses": [],
+        "created_at": today.isoformat(),
+        "updated_at": today.isoformat(),
+        "confidence": 0.5,
+    }
+    body = _replace_auto_section("", auto_block, today).lstrip("\n")
+    try:
+        fm.write_file(path, meta, body)
+    except Exception as e:
+        log.warning("learner: skeleton note write failed for %s: %s", bundle_id, e)
+        return None
+    return path
 
 
 def _resolve_app_note_path(bundle_id: str) -> Path | None:
@@ -145,8 +207,9 @@ def _replace_auto_section(body: str, new_block: str, today: date) -> str:
 def run_for_date(day: date) -> int:
     """Process control-<day>.md and update matching 40-Apps notes.
 
-    Returns the count of app notes updated. Failures (missing note, malformed
-    Haiku response, network error) leave the existing app note untouched.
+    Returns the count of app notes updated (including skeleton notes created
+    for apps seen in >= 2 records that had no note yet). Failures (malformed
+    LLM response, network error) leave existing app notes untouched.
     """
     records = _read_records(day)
     if not records:
@@ -157,6 +220,15 @@ def run_for_date(day: date) -> int:
     for bundle_id, recs in _by_bundle(records).items():
         path = _resolve_app_note_path(bundle_id)
         if path is None:
+            # No note yet — auto-create a skeleton once the app shows up in
+            # enough records to be worth remembering.
+            if len(recs) < _MIN_RECORDS_FOR_NEW_NOTE:
+                continue
+            new_block = _summarize_via_llm(derive_app_name(bundle_id), bundle_id, recs)
+            if new_block is None:
+                continue
+            if _create_skeleton_note(bundle_id, new_block, today) is not None:
+                updated += 1
             continue
         try:
             meta, body = fm.read_file(path)
