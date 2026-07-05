@@ -64,7 +64,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     if daemon is not None:
         try:
             await daemon.start()
-            log.info("yuki: observer started (window + idle sources)")
+            log.info("yuki: observer started (window + media + idle sources)")
         except Exception as e:
             log.warning("yuki: observer failed to start: %s", e)
             daemon = None
