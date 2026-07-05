@@ -7,6 +7,15 @@ from yuki.agent.desktop.views import DesktopState
 
 _EXEMPT = {'done_tool', 'wait_tool'}
 _IGNORE_PARAMS = {'thought', 'evaluate', 'plan'}
+# Tools that act on the SCREEN — only these are expected to change the UI.
+# Read-only / out-of-band tools (app notes, memory, now_playing, web search,
+# shell queries) legitimately leave the screen untouched; counting them as
+# "stagnant" produces false 'UI has not changed' warnings while the agent is
+# thinking or recalling.
+_UI_MUTATING = {
+    'click_tool', 'type_tool', 'scroll_tool', 'shortcut_tool',
+    'app_tool', 'move_tool', 'drag_tool',
+}
 # Hard-stop threshold: same action repeated this many times in a row → halt.
 _HARD_STOP_REPEATS = 3
 
@@ -41,8 +50,10 @@ class LoopGuard:
         self._last_consecutive_tool: str | None = None
         self._change_summary: str = ''
         self._last_window_title: str = ''
+        self._last_tool_was_ui_mutating: bool = False
 
     def record_action(self, tool: str, params: dict, is_success: bool = True) -> None:
+        self._last_tool_was_ui_mutating = tool in _UI_MUTATING
         if tool in _EXEMPT:
             return
         filtered = {k: v for k, v in params.items() if k not in _IGNORE_PARAMS}
@@ -100,11 +111,13 @@ class LoopGuard:
         if self._last_state is None:
             self._change_summary = ''
         elif state == self._last_state:
+            # "Your click missed" is only meaningful after a screen action;
+            # after a read-only tool an unchanged screen is expected.
             self._change_summary = (
                 'NO visible change: the active window and its elements are '
                 'identical to before your last action. If you expected a '
                 'change, the action likely missed or had no effect.'
-            )
+            ) if self._last_tool_was_ui_mutating else ''
         elif self._last_state[0] != state[0]:
             self._change_summary = (
                 f"The foreground window CHANGED to '{window_title}'. "
@@ -118,15 +131,16 @@ class LoopGuard:
             )
         self._last_window_title = window_title
 
+        # Stagnation only counts when the LAST action was one that should
+        # have changed the screen. A run of app-note reads / memory writes /
+        # AppleScript queries legitimately leaves the UI untouched — warning
+        # about it just confuses the model (and the user watching the pill).
         if state == self._last_state:
-            self._stagnant += 1
+            if self._last_tool_was_ui_mutating:
+                self._stagnant += 1
         else:
             self._stagnant = 0
         self._last_state = state
-
-    def change_summary(self) -> str:
-        """Human-readable description of what changed since the previous state."""
-        return self._change_summary
 
         fingerprint = f'{window_id}|{digest}'
         count = self._visited_states.get(fingerprint, 0) + 1
@@ -145,6 +159,10 @@ class LoopGuard:
             )
         else:
             self._cycle_warning = ''
+
+    def change_summary(self) -> str:
+        """Human-readable description of what changed since the previous state."""
+        return self._change_summary
 
     def check(self) -> str | None:
         warnings: list[str] = []
@@ -204,6 +222,7 @@ class LoopGuard:
         self._last_consecutive_tool = None
         self._change_summary = ''
         self._last_window_title = ''
+        self._last_tool_was_ui_mutating = False
 
 
 def should_continue(assistant_message) -> bool:

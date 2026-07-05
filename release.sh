@@ -56,18 +56,33 @@ TIKTOKEN_CACHE_DIR="$RES/tiktoken" \
   "$PYDIR/bin/python3" -c "import tiktoken; tiktoken.get_encoding('cl100k_base')" \
   || echo "warning: tiktoken preload failed (will download at first use)"
 
-# Deep ad-hoc sign the FULLY-ASSEMBLED bundle. This MUST be the last step
-# before zipping: `swift build` only linker-signs the executable, and copying
+# Deep sign the FULLY-ASSEMBLED bundle. This MUST be the last step before
+# zipping: `swift build` only linker-signs the executable, and copying
 # Python/resources in afterward breaks that seal ("code has no resources but
 # signature indicates they must be present"). A broken seal makes macOS refuse
 # to persist the Accessibility (TCC) grant — you grant it, it silently reverts.
 #
-# A stable --identifier (com.yuki.app, not the default CFBundleExecutable
-# "Yuki") also gives TCC a consistent identity to track. The app stays
-# UNNOTARIZED, so each rebuild still changes the cdhash and the user must
-# re-grant once per update — but within a version the grant now sticks.
-echo "==> Deep ad-hoc sign the assembled bundle"
-codesign --force --deep --sign - --identifier com.yuki.app "$APP"
+# Identity matters: with a REAL certificate (Apple Development / Developer ID)
+# the designated requirement anchors to the cert + identifier, which is STABLE
+# across rebuilds — TCC grants and Keychain ACLs then survive upgrades.
+# Ad-hoc (-) signatures are cdhash-only: every build is a "different app", so
+# users re-grant Accessibility + re-authorize Keychain on every update.
+# Override with YUKI_SIGN_IDENTITY; auto-detects a cert; falls back to ad-hoc.
+IDENTITY="${YUKI_SIGN_IDENTITY:-}"
+if [ -z "$IDENTITY" ]; then
+  IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+    | awk -F'"' '/Apple Development|Developer ID Application/ {print $2; exit}')
+fi
+if [ -n "$IDENTITY" ]; then
+  echo "==> Deep sign with identity: $IDENTITY"
+  codesign --force --deep --timestamp=none \
+    --sign "$IDENTITY" --identifier com.yuki.app "$APP" \
+    || { echo "identity signing failed; falling back to ad-hoc"; \
+         codesign --force --deep --sign - --identifier com.yuki.app "$APP"; }
+else
+  echo "==> Deep ad-hoc sign (no signing identity found)"
+  codesign --force --deep --sign - --identifier com.yuki.app "$APP"
+fi
 codesign --verify --deep --strict "$APP" \
   && echo "    signature: valid (deep seal over all contents)" \
   || { echo "ERROR: bundle signature failed to verify"; exit 1; }
