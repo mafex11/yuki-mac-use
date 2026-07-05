@@ -1,14 +1,65 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-  <!-- Minimalist Yuki icon: flat off-black squircle, clean off-white Y. No gradients. -->
-  <rect x="0" y="0" width="1024" height="1024" rx="228" ry="228" fill="#1c1c1e"/>
-  <!-- The Y: two upper arms meeting a vertical stem, rounded caps, geometric. -->
-  <g fill="none" stroke="#f5f5f7" stroke-width="86" stroke-linecap="round" stroke-linejoin="round">
-    <!-- left arm -->
-    <path d="M 326 300 L 512 540"/>
-    <!-- right arm -->
-    <path d="M 698 300 L 512 540"/>
-    <!-- stem -->
-    <path d="M 512 540 L 512 724"/>
+  <!-- Yuki (雪 = snow): a Y that is also a six-point snowflake. The heavy
+       bright spokes form the Y (up-left, up-right, down); three lighter
+       spokes (up, down-left, down-right) with frost-dot tips complete the
+       flake. Deep night gradient, quiet and precise. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b1020"/>
+      <stop offset="55%" stop-color="#111b36"/>
+      <stop offset="100%" stop-color="#1d3057"/>
+    </linearGradient>
+    <linearGradient id="mark" gradientUnits="userSpaceOnUse"
+                    x1="512" y1="280" x2="512" y2="800">
+      <stop offset="0%" stop-color="#f4f9ff"/>
+      <stop offset="100%" stop-color="#c9e0f6"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0.5" cy="0.46" r="0.62">
+      <stop offset="0%" stop-color="#7fb4e8" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#7fb4e8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1024" height="1024" rx="228" ry="228" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1024" height="1024" rx="228" ry="228" fill="url(#halo)"/>
+
+  <!-- faint distant flakes -->
+  <g fill="#cfe4f7">
+    <circle cx="240" cy="234" r="6" opacity="0.30"/>
+    <circle cx="806" cy="286" r="4" opacity="0.24"/>
+    <circle cx="762" cy="798" r="5" opacity="0.26"/>
+    <circle cx="238" cy="760" r="4" opacity="0.22"/>
+    <circle cx="648" cy="170" r="3" opacity="0.20"/>
+    <circle cx="366" cy="846" r="4" opacity="0.22"/>
   </g>
+
+  <!-- soft glow under the Y (translucent wide strokes, no filters) -->
+  <g stroke="#8ec1ee" stroke-linecap="round" fill="none" opacity="0.16">
+    <path d="M 512 512 L 348 322" stroke-width="130"/>
+    <path d="M 512 512 L 676 322" stroke-width="130"/>
+    <path d="M 512 512 L 512 764" stroke-width="130"/>
+  </g>
+
+  <!-- light spokes completing the snowflake: up, down-left, down-right -->
+  <g stroke="#8fbbe4" stroke-width="26" stroke-linecap="round" fill="none" opacity="0.9">
+    <path d="M 512 470 L 512 276"/>
+    <path d="M 476 538 L 314 632"/>
+    <path d="M 548 538 L 710 632"/>
+  </g>
+  <g fill="#bcd8f1" opacity="0.95">
+    <circle cx="512" cy="246" r="16"/>
+    <circle cx="288" cy="647" r="16"/>
+    <circle cx="736" cy="647" r="16"/>
+  </g>
+
+  <!-- the Y -->
+  <g stroke="url(#mark)" stroke-width="66" stroke-linecap="round" fill="none">
+    <path d="M 512 512 L 348 322"/>
+    <path d="M 512 512 L 676 322"/>
+    <path d="M 512 512 L 512 764"/>
+  </g>
+
+  <!-- center crystal -->
+  <circle cx="512" cy="512" r="30" fill="#f4f9ff"/>
 </svg>
