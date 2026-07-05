@@ -19,6 +19,8 @@ def _no_keychain_prompts() -> None:
     fully non-interactive.
     """
     os.environ["YUKI_NO_KEYCHAIN"] = "1"
+    # Never start the real observer daemon (AX/AppleScript polling) in tests.
+    os.environ["YUKI_OBSERVER"] = "0"
 
 
 @pytest.fixture

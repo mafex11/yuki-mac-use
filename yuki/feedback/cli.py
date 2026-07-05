@@ -1,4 +1,4 @@
-"""CLI: `python -m yuki.feedback.cli` runs the daily learner for yesterday."""
+"""CLI: `python -m yuki.feedback.cli` runs the daily learner + profiler."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from yuki.feedback.learner import run_for_date
+from yuki.feedback.profiler import run_profile
 
 
 def main() -> None:
@@ -24,6 +25,12 @@ def main() -> None:
     updated = run_for_date(yesterday)
     print(
         f"yuki: feedback learner updated {updated} app note(s) for {yesterday}",
+        file=sys.stderr,
+    )
+
+    profiled = run_profile()
+    print(
+        f"yuki: profiler updated {profiled} identity/routine note(s)",
         file=sys.stderr,
     )
 

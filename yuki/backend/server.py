@@ -32,17 +32,24 @@ def require_token(authorization: Annotated[str, Header()] = "") -> None:
 
 
 def _build_observer():
-    """Build the observer Daemon if YUKI_OBSERVER=1 (default off)."""
-    if os.environ.get("YUKI_OBSERVER", "0") != "1":
+    """Build the observer Daemon unless YUKI_OBSERVER=0 (default ON).
+
+    This is Yuki's passive-learning input: frontmost app + window titles,
+    now-playing music, and idle rhythm, persisted locally to index.db and
+    distilled daily into 00-Identity/30-Routines notes by the profiler.
+    Raw events never leave the machine (30-day retention, see Persister).
+    """
+    if os.environ.get("YUKI_OBSERVER", "1") == "0":
         return None
     try:
         from yuki.observer.daemon import Daemon
         from yuki.observer.sources.idle import IdleSource
-        from yuki.observer.sources.window import WindowSource
+        from yuki.observer.sources.media import MediaSource
+        from yuki.observer.sources.window import WindowPollSource
     except Exception as e:
         log.warning("observer disabled: import failed: %s", e)
         return None
-    return Daemon(sources=[WindowSource(), IdleSource()])
+    return Daemon(sources=[WindowPollSource(), MediaSource(), IdleSource()])
 
 
 @asynccontextmanager

@@ -25,6 +25,7 @@ class EventKind(StrEnum):
     WAKE = "wake"
     POWER_SOURCE_CHANGED = "power_source_changed"
     WIFI_CHANGED = "wifi_changed"
+    MEDIA_PLAYING = "media_playing"
 
 
 @dataclass
