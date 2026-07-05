@@ -14,6 +14,9 @@ class EventType(str, Enum):
     STATE = "state"
     DONE = "done"
     ERROR = "error"
+    ASK = "ask"          # agent is waiting for the user's answer
+    PAUSED = "paused"    # user took over; agent paused
+    RESUMED = "resumed"
 
 
 @dataclass
