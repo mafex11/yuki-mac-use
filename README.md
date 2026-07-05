@@ -52,26 +52,49 @@
 
 A macOS-native personal AI assistant that learns who you are.
 
+Tell Yuki what you want in plain words — "play my japanese playlist on
+spotify", "reply to mom on whatsapp" — and it does it: directly through the
+app when it can (Spotify, Music, browser, Mail, Messages, Calendar, ...),
+by driving the screen when it must. While it works, a small activity pill
+shows each step in plain words with live progress and a Stop button.
+
+Yuki also learns you, passively and locally: which apps you use, what music
+you actually listen to, your daily rhythm. Once a day it distills that into
+short profile notes (in `~/YukiVault`, yours to read and edit) that shape
+every answer — so "play something I'd like" means something. Raw activity
+never leaves your Mac; only small aggregated summaries reach your chosen AI
+provider. Opt out anytime with `YUKI_OBSERVER=0`.
+
 **Status:** Pre-alpha. See `docs/superpowers/specs/2026-05-22-yuki-macos-design.md` for the full design and `docs/superpowers/plans/` for implementation plans.
 
 ## Install
 
 ```bash
-brew install --cask mafex11/tap/yuki
+brew tap mafex11/tap
+brew install --cask yuki
 ```
 
-On first launch, macOS Gatekeeper blocks unsigned apps. **Right-click `Yuki.app`
-in `/Applications` → Open → confirm** (only needed once). Yuki then walks you
-through granting Accessibility permission and choosing an AI provider
-(Google Gemini free tier, Anthropic, or local Ollama).
+Already installed? Update with:
+
+```bash
+brew update && brew upgrade --cask yuki
+```
+
+On first launch Yuki walks you through granting Accessibility permission and
+choosing an AI provider (Google Gemini free tier, Anthropic, or local
+Ollama). Since v0.4.1 the app is signed with a stable identity, so
+permissions survive updates — you grant them once.
 
 Press **⌘⇧A** anywhere to open the command bar.
 
 ### Building a release (maintainers)
 
 ```bash
-./release.sh 0.1.0                       # builds build/Yuki-0.1.0.zip + prints sha256
-gh release create v0.1.0 build/Yuki-0.1.0.zip
+# bump version in pyproject.toml + packaging/briefcase.toml first
+./release.sh 0.4.1                       # builds build/Yuki-<v>.zip + prints sha256
+                                         # signs with your Apple cert if present
+                                         # (YUKI_SIGN_IDENTITY to override)
+gh release create v0.4.1 build/Yuki-0.4.1.zip
 # then bump version + sha256 in homebrew-tap/Casks/yuki.rb and push the tap
 ```
 
