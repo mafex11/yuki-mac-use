@@ -135,6 +135,10 @@ tests/                 # pytest tests, mirrors yuki/ structure
 pyproject.toml         # deps + tool config (ruff, mypy, pytest)
 ```
 
+## Credits
+
+Yuki's agent core started as a fork of [MacOS-Use](https://github.com/CursorTouch/MacOS-Use) by Jeomon George (MIT License). The modules in `yuki/agent`, `yuki/ax`, `yuki/messages`, `yuki/providers` and `yuki/tools` were vendored from it in May 2026 and then changed for Yuki (telemetry removed, package renamed, new tools, tool retrieval, loop guard, memory and the macOS app). Thank you to the MacOS-Use project. Its license notice is in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+
 ## License
 
-MIT — see `LICENSE`.
+MIT, see `LICENSE`. Parts derived from MacOS-Use keep their original MIT notice, see `THIRD_PARTY_NOTICES.md`.
